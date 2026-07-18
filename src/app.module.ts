@@ -10,6 +10,13 @@ import { PublicModule } from './rest/public/public.controller';
 import { RouterModule } from '@nestjs/core';
 import { AuthModule } from './collection/auth/auth.module';
 import { AdminModule } from './rest/admin/admin.controller';
+import { CategoriesModule } from './collection/categories/categories.module';
+import { SuppliersModule } from './collection/suppliers/suppliers.module';
+import { ProductsModule } from './collection/products/products.module';
+import { TrucksModule } from './collection/trucks/trucks.module';
+import { ImportsModule } from './collection/imports/imports.module';
+import { InvoicesModule } from './collection/invoices/invoices.module';
+import { DashboardModule } from './collection/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -17,6 +24,13 @@ import { AdminModule } from './rest/admin/admin.controller';
     TypegooseModule.forRoot(process.env.MONGO),
     AuthModule,
     UsersModule,
+    CategoriesModule,
+    SuppliersModule,
+    ProductsModule,
+    TrucksModule,
+    ImportsModule,
+    InvoicesModule,
+    DashboardModule,
     PublicModule,
     AdminModule,
     RouterModule.register([
