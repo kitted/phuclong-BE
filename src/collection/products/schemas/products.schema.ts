@@ -10,8 +10,8 @@ export class Products extends BaseModel {
   @prop({ required: true })
   name: string;
 
-  @prop({ ref: () => Categories })
-  categoryId: Ref<Categories>;
+  @prop({ ref: () => Categories, required: false, default: null })
+  categoryId?: Ref<Categories>;
 
   @prop()
   unit: string;
@@ -28,6 +28,6 @@ export class Products extends BaseModel {
   @prop({ default: 0 })
   stock: number;
 
-  @prop({ ref: () => Suppliers })
-  supplierId: Ref<Suppliers>;
+  @prop({ ref: () => Suppliers, required: false, default: null })
+  supplierId?: Ref<Suppliers>;
 }

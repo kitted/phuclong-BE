@@ -1,4 +1,4 @@
-FROM node:18-alpine As build
+FROM node:20-alpine As build
 ARG BRANCH
 
 RUN apk update && apk upgrade && \
