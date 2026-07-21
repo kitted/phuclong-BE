@@ -5,6 +5,8 @@ import { Products } from '../products/schemas/products.schema';
 import { ReturnModelType } from '@typegoose/typegoose';
 import { CreateImportDto } from './dtos/imports.dto';
 import { ID } from 'src/core/interfaces/id.interface';
+import { InventoryMovementsService } from '../inventory/inventory-movements.service';
+import { InventoryLocationType, InventoryMovementType } from '../inventory/schemas/inventory-movement.schema';
 
 @Injectable()
 export class ImportsService {
@@ -13,6 +15,7 @@ export class ImportsService {
     private readonly model: ReturnModelType<typeof Imports>,
     @InjectModel(Products)
     private readonly productModel: ReturnModelType<typeof Products>,
+    private readonly movements: InventoryMovementsService,
   ) {}
 
   async create(dto: CreateImportDto) {
@@ -30,10 +33,23 @@ export class ImportsService {
     // Increase stock in warehouse
     if (dto.status !== 'cancelled') {
       for (const item of dto.items) {
-        await this.productModel.updateOne(
+        const product = await this.productModel.findOneAndUpdate(
           { _id: item.productId },
-          { $inc: { stock: item.qty } }
+          { $inc: { stock: item.qty } },
+          { new: false },
         );
+        const before = product?.stock || 0;
+        await this.movements.record({
+          productId: item.productId,
+          type: InventoryMovementType.IMPORT,
+          quantityChange: item.qty,
+          quantityBefore: before,
+          quantityAfter: before + item.qty,
+          destinationType: InventoryLocationType.WAREHOUSE,
+          referenceType: 'IMPORT',
+          referenceId: String(created._id),
+          referenceCode: created.code,
+        });
       }
     }
 

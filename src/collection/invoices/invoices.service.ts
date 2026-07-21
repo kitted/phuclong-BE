@@ -6,6 +6,8 @@ import { Trucks } from '../trucks/schemas/trucks.schema';
 import { ReturnModelType } from '@typegoose/typegoose';
 import { CreateInvoiceDto } from './dtos/invoices.dto';
 import { ID } from 'src/core/interfaces/id.interface';
+import { InventoryMovementsService } from '../inventory/inventory-movements.service';
+import { InventoryLocationType, InventoryMovementType } from '../inventory/schemas/inventory-movement.schema';
 
 @Injectable()
 export class InvoicesService {
@@ -16,6 +18,7 @@ export class InvoicesService {
     private readonly productModel: ReturnModelType<typeof Products>,
     @InjectModel(Trucks)
     private readonly truckModel: ReturnModelType<typeof Trucks>,
+    private readonly movements: InventoryMovementsService,
   ) {}
 
   async create(dto: CreateInvoiceDto) {
@@ -52,19 +55,45 @@ export class InvoicesService {
     // 2. Process stock deduction
     if (dto.sourceType === 'warehouse') {
       for (const item of dto.items) {
+        const product = await this.productModel.findById(item.productId).lean();
+        const before = product?.stock || 0;
         await this.productModel.updateOne(
           { _id: item.productId },
           { $inc: { stock: -item.qty } }
         );
+        await this.movements.record({
+          productId: item.productId,
+          type: InventoryMovementType.WAREHOUSE_SALE,
+          quantityChange: -item.qty,
+          quantityBefore: before,
+          quantityAfter: before - item.qty,
+          sourceType: InventoryLocationType.WAREHOUSE,
+          referenceType: 'INVOICE',
+          referenceId: String(created._id),
+          referenceCode: created.code,
+        });
       }
     } else if (dto.sourceType === 'truck') {
       const truck = await this.truckModel.findOne({ _id: dto.truckId, isDeleted: false });
       for (const item of dto.items) {
         const invIdx = truck.inventory.findIndex(i => i.productId.toString() === item.productId);
+        const before = truck.inventory[invIdx].qty;
         truck.inventory[invIdx].qty -= item.qty;
         if (truck.inventory[invIdx].qty === 0) {
           truck.inventory.splice(invIdx, 1);
         }
+        await this.movements.record({
+          productId: item.productId,
+          type: InventoryMovementType.TRUCK_SALE,
+          quantityChange: -item.qty,
+          quantityBefore: before,
+          quantityAfter: before - item.qty,
+          sourceType: InventoryLocationType.TRUCK,
+          sourceTruckId: String(truck._id),
+          referenceType: 'INVOICE',
+          referenceId: String(created._id),
+          referenceCode: created.code,
+        });
       }
       await truck.save();
     }

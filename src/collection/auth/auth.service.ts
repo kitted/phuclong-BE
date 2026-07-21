@@ -48,7 +48,7 @@ export class AuthService {
 
     const refresh_token = await this.jwtService.signAsync(payload, {
       secret: jwtConstants.secret_refresh,
-      expiresIn: jwtConstants.expiresInRefresh,
+      expiresIn: jwtConstants.expiresInRefresh as any,
     });
 
     const newToken = randomBytes(32).toString('hex');

@@ -5,6 +5,8 @@ import { Products } from '../products/schemas/products.schema';
 import { ReturnModelType } from '@typegoose/typegoose';
 import { CreateTruckDto, UpdateTruckDto, LoadGoodsDto, ReturnGoodsDto } from './dtos/trucks.dto';
 import { ID } from 'src/core/interfaces/id.interface';
+import { InventoryMovementsService } from '../inventory/inventory-movements.service';
+import { InventoryLocationType, InventoryMovementType } from '../inventory/schemas/inventory-movement.schema';
 
 @Injectable()
 export class TrucksService {
@@ -13,6 +15,7 @@ export class TrucksService {
     private readonly model: ReturnModelType<typeof Trucks>,
     @InjectModel(Products)
     private readonly productModel: ReturnModelType<typeof Products>,
+    private readonly movements: InventoryMovementsService,
   ) {}
 
   async create(dto: CreateTruckDto) {
@@ -66,6 +69,8 @@ export class TrucksService {
 
     // 2. Process
     for (const item of dto.items) {
+      const product = await this.productModel.findById(item.productId).lean();
+      const before = product?.stock || 0;
       // Decrease warehouse stock
       await this.productModel.updateOne(
         { _id: item.productId },
@@ -79,6 +84,19 @@ export class TrucksService {
       } else {
         truck.inventory.push({ productId: item.productId as any, qty: item.qty });
       }
+      await this.movements.record({
+        productId: item.productId,
+        type: InventoryMovementType.TRANSFER_TO_TRUCK,
+        quantityChange: -item.qty,
+        quantityBefore: before,
+        quantityAfter: before - item.qty,
+        sourceType: InventoryLocationType.WAREHOUSE,
+        destinationType: InventoryLocationType.TRUCK,
+        destinationTruckId: String(truck._id),
+        referenceType: 'TRUCK_LOAD',
+        referenceId: String(truck._id),
+        referenceCode: truck.code,
+      });
     }
 
     return await truck.save();
@@ -96,6 +114,8 @@ export class TrucksService {
     }
 
     for (const item of dto.items) {
+      const product = await this.productModel.findById(item.productId).lean();
+      const before = product?.stock || 0;
       // Increase warehouse stock
       await this.productModel.updateOne(
         { _id: item.productId },
@@ -108,6 +128,19 @@ export class TrucksService {
       if (truck.inventory[invIdx].qty === 0) {
         truck.inventory.splice(invIdx, 1);
       }
+      await this.movements.record({
+        productId: item.productId,
+        type: InventoryMovementType.RETURN_FROM_TRUCK,
+        quantityChange: item.qty,
+        quantityBefore: before,
+        quantityAfter: before + item.qty,
+        sourceType: InventoryLocationType.TRUCK,
+        sourceTruckId: String(truck._id),
+        destinationType: InventoryLocationType.WAREHOUSE,
+        referenceType: 'TRUCK_RETURN',
+        referenceId: String(truck._id),
+        referenceCode: truck.code,
+      });
     }
 
     // TODO: We could save dto.note to a TruckReturns collection for logging

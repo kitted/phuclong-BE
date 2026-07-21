@@ -7,6 +7,7 @@ import { TrucksModule } from 'src/collection/trucks/trucks.module';
 import { ImportsModule } from 'src/collection/imports/imports.module';
 import { InvoicesModule } from 'src/collection/invoices/invoices.module';
 import { DashboardModule } from 'src/collection/dashboard/dashboard.module';
+import { InventoryModule } from 'src/collection/inventory/inventory.module';
 
 import { UsersController } from './controllers/users';
 import { CategoriesController } from './controllers/categories.controller';
@@ -16,6 +17,7 @@ import { TrucksController } from './controllers/trucks.controller';
 import { ImportsController } from './controllers/imports.controller';
 import { InvoicesController } from './controllers/invoices.controller';
 import { DashboardController } from './controllers/dashboard.controller';
+import { InventoryController } from './controllers/inventory.controller';
 
 @Module({
   imports: [
@@ -27,6 +29,7 @@ import { DashboardController } from './controllers/dashboard.controller';
     ImportsModule,
     InvoicesModule,
     DashboardModule,
+    InventoryModule,
   ],
   controllers: [
     UsersController,
@@ -37,6 +40,7 @@ import { DashboardController } from './controllers/dashboard.controller';
     ImportsController,
     InvoicesController,
     DashboardController,
+    InventoryController,
   ],
 })
 export class AdminModule {}

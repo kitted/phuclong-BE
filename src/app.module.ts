@@ -17,6 +17,7 @@ import { TrucksModule } from './collection/trucks/trucks.module';
 import { ImportsModule } from './collection/imports/imports.module';
 import { InvoicesModule } from './collection/invoices/invoices.module';
 import { DashboardModule } from './collection/dashboard/dashboard.module';
+import { InventoryModule } from './collection/inventory/inventory.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { DashboardModule } from './collection/dashboard/dashboard.module';
     ImportsModule,
     InvoicesModule,
     DashboardModule,
+    InventoryModule,
     PublicModule,
     AdminModule,
     RouterModule.register([
