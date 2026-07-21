@@ -8,6 +8,8 @@ import { ImportsModule } from 'src/collection/imports/imports.module';
 import { InvoicesModule } from 'src/collection/invoices/invoices.module';
 import { DashboardModule } from 'src/collection/dashboard/dashboard.module';
 import { InventoryModule } from 'src/collection/inventory/inventory.module';
+import { CustomersModule } from 'src/collection/customers/customers.module';
+import { PromotionsModule } from 'src/collection/promotions/promotions.module';
 
 import { UsersController } from './controllers/users';
 import { CategoriesController } from './controllers/categories.controller';
@@ -18,6 +20,8 @@ import { ImportsController } from './controllers/imports.controller';
 import { InvoicesController } from './controllers/invoices.controller';
 import { DashboardController } from './controllers/dashboard.controller';
 import { InventoryController } from './controllers/inventory.controller';
+import { CustomersController } from './controllers/customers.controller';
+import { PromotionsController } from './controllers/promotions.controller';
 
 @Module({
   imports: [
@@ -30,6 +34,8 @@ import { InventoryController } from './controllers/inventory.controller';
     InvoicesModule,
     DashboardModule,
     InventoryModule,
+    CustomersModule,
+    PromotionsModule,
   ],
   controllers: [
     UsersController,
@@ -41,6 +47,8 @@ import { InventoryController } from './controllers/inventory.controller';
     InvoicesController,
     DashboardController,
     InventoryController,
+    CustomersController,
+    PromotionsController,
   ],
 })
 export class AdminModule {}

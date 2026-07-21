@@ -18,6 +18,8 @@ import { ImportsModule } from './collection/imports/imports.module';
 import { InvoicesModule } from './collection/invoices/invoices.module';
 import { DashboardModule } from './collection/dashboard/dashboard.module';
 import { InventoryModule } from './collection/inventory/inventory.module';
+import { CustomersModule } from './collection/customers/customers.module';
+import { PromotionsModule } from './collection/promotions/promotions.module';
 
 @Module({
   imports: [
@@ -33,6 +35,8 @@ import { InventoryModule } from './collection/inventory/inventory.module';
     InvoicesModule,
     DashboardModule,
     InventoryModule,
+    CustomersModule,
+    PromotionsModule,
     PublicModule,
     AdminModule,
     RouterModule.register([

@@ -8,6 +8,7 @@ import { CreateInvoiceDto } from './dtos/invoices.dto';
 import { ID } from 'src/core/interfaces/id.interface';
 import { InventoryMovementsService } from '../inventory/inventory-movements.service';
 import { InventoryLocationType, InventoryMovementType } from '../inventory/schemas/inventory-movement.schema';
+import { Customers } from '../customers/schemas/customers.schema';
 
 @Injectable()
 export class InvoicesService {
@@ -19,6 +20,8 @@ export class InvoicesService {
     @InjectModel(Trucks)
     private readonly truckModel: ReturnModelType<typeof Trucks>,
     private readonly movements: InventoryMovementsService,
+    @InjectModel(Customers)
+    private readonly customerModel: ReturnModelType<typeof Customers>,
   ) {}
 
   async create(dto: CreateInvoiceDto) {
@@ -27,6 +30,14 @@ export class InvoicesService {
 
     if (dto.sourceType === 'truck' && !dto.truckId) {
       throw new BadRequestException('Phải chọn xe tải khi xuất từ xe');
+    }
+
+    if (dto.customerId && !await this.customerModel.exists({ _id: dto.customerId, isDeleted: false })) {
+      throw new BadRequestException('Khách hàng không tồn tại');
+    }
+    const paidAmount = Number(dto.paidAmount) || 0;
+    if (paidAmount < 0 || paidAmount > dto.totalAmount) {
+      throw new BadRequestException('Số tiền đã thanh toán không hợp lệ');
     }
 
     // 1. Validate stock
@@ -50,7 +61,8 @@ export class InvoicesService {
       }
     }
 
-    const created = await this.model.create(dto);
+    const paymentStatus = paidAmount >= dto.totalAmount ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : 'UNPAID';
+    const created = await this.model.create({ ...dto, paidAmount, paymentStatus });
 
     // 2. Process stock deduction
     if (dto.sourceType === 'warehouse') {
@@ -96,6 +108,13 @@ export class InvoicesService {
         });
       }
       await truck.save();
+    }
+
+    if (dto.customerId) {
+      await this.customerModel.updateOne(
+        { _id: dto.customerId, isDeleted: false },
+        { $inc: { debt: dto.totalAmount - paidAmount } },
+      );
     }
 
     return created;

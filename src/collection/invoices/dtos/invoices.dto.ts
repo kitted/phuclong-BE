@@ -33,6 +33,15 @@ export class CreateInvoiceDto {
   @IsNotEmpty()
   customer: string;
 
+  @ApiProperty({ required: false })
+  @IsOptional()
+  customerId?: ID | string;
+
+  @ApiProperty({ required: false })
+  @IsNumber()
+  @IsOptional()
+  paidAmount?: number;
+
   @ApiProperty({ enum: ['warehouse', 'truck'] })
   @IsEnum(['warehouse', 'truck'])
   @IsNotEmpty()

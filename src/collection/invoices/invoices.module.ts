@@ -5,9 +5,10 @@ import { Products } from '../products/schemas/products.schema';
 import { Trucks } from '../trucks/schemas/trucks.schema';
 import { InvoicesService } from './invoices.service';
 import { InventoryMovementsModule } from '../inventory/inventory-movements.module';
+import { Customers } from '../customers/schemas/customers.schema';
 
 @Module({
-  imports: [TypegooseModule.forFeature([Invoices, Products, Trucks]), InventoryMovementsModule],
+  imports: [TypegooseModule.forFeature([Invoices, Products, Trucks, Customers]), InventoryMovementsModule],
   providers: [InvoicesService],
   exports: [InvoicesService],
 })
