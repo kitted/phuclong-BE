@@ -5,6 +5,9 @@ import { Customers } from './schemas/customers.schema';
 import { CreateCustomerDto, CreateInteractionDto, CustomerQueryDto, UpdateCustomerDto } from './dtos/customers.dto';
 import { Invoices } from '../invoices/schemas/invoices.schema';
 import { Vouchers } from '../promotions/schemas/promotions.schema';
+import * as ExcelJS from 'exceljs';
+import { excelBoolean, excelNumber, excelValue, normalizeExcelRow } from '../../core/excel-import';
+import { CustomerSegment, CustomerSource } from './schemas/customers.schema';
 
 @Injectable()
 export class CustomersService {
@@ -101,5 +104,67 @@ export class CustomersService {
     );
     if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
     return { data: customer.interactions[customer.interactions.length - 1] };
+  }
+
+  async importRows(rows: Record<string, unknown>[]): Promise<any> {
+    if (!Array.isArray(rows) || !rows.length) throw new BadRequestException('File import không có dữ liệu');
+    if (rows.length > 10000) throw new BadRequestException('Mỗi lần chỉ được import tối đa 10.000 dòng');
+    let created = 0; let updated = 0;
+    const errors: Array<{ row: number; message: string; data: Record<string, unknown> }> = [];
+    const validSources = Object.values(CustomerSource);
+    const validSegments = Object.values(CustomerSegment);
+
+    for (let index = 0; index < rows.length; index++) {
+      const original = rows[index];
+      try {
+        const row = normalizeExcelRow(original);
+        const name = String(excelValue(row, ['Tên khách hàng', 'Tên', 'name'])).trim();
+        const phone = String(excelValue(row, ['Số điện thoại', 'Điện thoại', 'phone'])).replace(/\s/g, '');
+        if (!name || !phone) throw new Error('Thiếu tên khách hàng hoặc số điện thoại');
+        const source = String(excelValue(row, ['Nguồn', 'source'])).trim().toUpperCase() as CustomerSource;
+        const segment = String(excelValue(row, ['Phân loại', 'segment'])).trim().toUpperCase() as CustomerSegment;
+        const payload: any = {
+          name,
+          phone,
+          email: String(excelValue(row, ['Email', 'email'])).trim() || undefined,
+          address: String(excelValue(row, ['Địa chỉ', 'address'])).trim() || undefined,
+          zaloConnected: excelBoolean(excelValue(row, ['Đã kết bạn Zalo', 'Zalo', 'zaloConnected'])),
+          debtLimit: Math.max(0, excelNumber(excelValue(row, ['Hạn mức công nợ', 'debtLimit']))),
+          note: String(excelValue(row, ['Ghi chú', 'note'])).trim() || undefined,
+        };
+        if (validSources.includes(source)) payload.source = source;
+        if (validSegments.includes(segment)) payload.segment = segment;
+        const existing = await this.model.findOne({ phone, isDeleted: false }).select('_id').lean();
+        if (existing) {
+          await this.model.updateOne({ _id: existing._id }, { $set: payload });
+          updated++;
+        } else {
+          await this.model.create({ ...payload, code: await this.nextCode() });
+          created++;
+        }
+      } catch (error) {
+        errors.push({ row: index + 2, message: error instanceof Error ? error.message : 'Không thể lưu khách hàng', data: original });
+      }
+    }
+    return { data: { totalRows: rows.length, created, updated, failed: errors.length, errors } };
+  }
+
+  async exportExcel(): Promise<Buffer> {
+    const customers = await this.model.find({ isDeleted: false }).sort({ createdAt: -1 }).lean();
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Khach hang');
+    sheet.columns = [
+      { header: 'Mã khách hàng', key: 'code', width: 18 }, { header: 'Tên khách hàng', key: 'name', width: 30 },
+      { header: 'Số điện thoại', key: 'phone', width: 18 }, { header: 'Email', key: 'email', width: 28 },
+      { header: 'Địa chỉ', key: 'address', width: 32 }, { header: 'Nguồn', key: 'source', width: 14 },
+      { header: 'Phân loại', key: 'segment', width: 18 }, { header: 'Đã kết bạn Zalo', key: 'zaloConnected', width: 20 },
+      { header: 'Công nợ', key: 'debt', width: 16 }, { header: 'Hạn mức công nợ', key: 'debtLimit', width: 20 },
+      { header: 'Ghi chú', key: 'note', width: 32 },
+    ];
+    customers.forEach((item: any) => sheet.addRow({ ...item, zaloConnected: item.zaloConnected ? 'Có' : 'Không' }));
+    sheet.getRow(1).font = { bold: true }; sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = { from: 'A1', to: 'K1' };
+    sheet.getColumn('phone').numFmt = '@'; sheet.getColumn('debt').numFmt = '#,##0'; sheet.getColumn('debtLimit').numFmt = '#,##0';
+    return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 }

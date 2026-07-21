@@ -1,10 +1,11 @@
-import { Body, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
-import { ApiOperation } from '@nestjs/swagger';
+import { Body, Delete, Get, Param, Post, Put, Res, StreamableFile } from '@nestjs/common';
+import { ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { ProductsService } from 'src/collection/products/products.service';
-import { CreateProductDto, UpdateProductDto } from 'src/collection/products/dtos/products.dto';
+import { CreateProductDto, ImportProductsDto, UpdateProductDto } from 'src/collection/products/dtos/products.dto';
+import { Response } from 'express';
 
 @WarehouseController(['products'])
 export class ProductsController {
@@ -20,6 +21,24 @@ export class ProductsController {
   @Get()
   async findAll() {
     return await this.service.findAll();
+  }
+
+  @ApiOperation({ summary: 'Export all products to XLSX' })
+  @ApiProduces('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Get('export')
+  async export(@Res({ passthrough: true }) response: Response) {
+    const file = await this.service.exportExcel();
+    response.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="products-${new Date().toISOString().slice(0, 10)}.xlsx"`,
+    });
+    return new StreamableFile(file);
+  }
+
+  @ApiOperation({ summary: 'Bulk upsert products parsed from Excel by code' })
+  @Post('import')
+  import(@Body() dto: ImportProductsDto) {
+    return this.service.importRows(dto.rows);
   }
 
   @ApiOperation({ summary: 'Get product by ID' })

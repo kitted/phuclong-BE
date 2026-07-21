@@ -1,5 +1,5 @@
 import {
-  IsNotEmpty,
+  IsNotEmpty, IsArray,
   IsNumber,
   IsOptional,
   IsString,
@@ -57,3 +57,9 @@ export class CreateProductDto {
 
 // PartialType sẽ kế thừa toàn bộ CreateProductDto và tự động chuyển mọi trường thành Optional
 export class UpdateProductDto extends PartialType(CreateProductDto) {}
+
+export class ImportProductsDto {
+  @ApiProperty({ type: 'array', items: { type: 'object', additionalProperties: true } })
+  @IsArray()
+  rows: Record<string, unknown>[];
+}

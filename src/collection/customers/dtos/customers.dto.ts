@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsBoolean, IsEmail, IsEnum, IsMongoId, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { CustomerSegment, CustomerSource } from '../schemas/customers.schema';
 
 export class CreateCustomerDto {
@@ -29,4 +29,10 @@ export class CreateInteractionDto {
   @ApiProperty() @IsString() @IsNotEmpty() channel: string;
   @ApiProperty() @IsString() @IsNotEmpty() action: string;
   @ApiPropertyOptional() @IsOptional() @IsString() result?: string;
+}
+
+export class ImportCustomersDto {
+  @ApiProperty({ type: 'array', items: { type: 'object', additionalProperties: true } })
+  @IsArray()
+  rows: Record<string, unknown>[];
 }
