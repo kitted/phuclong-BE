@@ -37,8 +37,8 @@ export class CustomersController {
   @Get(':id/promotion-activations') @ApiOperation({ summary: 'Get promotion activations of customer' })
   activationsOfCustomer(@Param('id', ParseIdPipe) id: ID, @Query() query: PromotionActivationQueryDto): Promise<any> { return this.activations.findAll({ ...query, customerId: String(id) }); }
 
-  @Post(':id/debt-payments') @AdminOnly() @ApiOperation({ summary: 'Collect and allocate customer debt payment' })
-  createDebtPayment(@Param('id', ParseIdPipe) id: ID, @Body() dto: CreateDebtPaymentDto, @Req() request: AuthRequest): Promise<any> { const user: any = request.user; return this.debtPayments.create(String(id), dto, String(user?.id || user?._id || '')); }
+  @Post(':id/debt-payments') @ApiOperation({ summary: 'Collect and allocate customer debt payment' })
+  createDebtPayment(@Param('id', ParseIdPipe) id: ID, @Body() dto: CreateDebtPaymentDto, @Req() request: AuthRequest): Promise<any> { const user: any = request.user; const doc = user?._doc || user; return this.debtPayments.create(String(id), dto, { id: String(doc?.id || doc?._id || ''), role: doc?.role }); }
 
   @Get(':id/debt-payments') @ApiOperation({ summary: 'Get customer debt payment history' })
   customerDebtPayments(@Param('id', ParseIdPipe) id: ID, @Query() query: DebtPaymentQueryDto): Promise<any> { return this.debtPayments.findAll({ ...query, customerId: String(id) }); }
