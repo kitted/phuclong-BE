@@ -11,13 +11,13 @@ export class TruckInventory {
 }
 
 export class Trucks extends BaseModel {
-  @prop()
+  @prop({ unique: true, required: true })
   code: string;
 
   @prop({ required: true })
   name: string;
 
-  @prop({ required: true })
+  @prop({ required: true, unique: true })
   licensePlate: string;
 
   @prop()

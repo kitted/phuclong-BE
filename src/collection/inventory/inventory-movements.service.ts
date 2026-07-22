@@ -6,6 +6,7 @@ import {
   InventoryMovementType,
   InventoryLocationType,
 } from './schemas/inventory-movement.schema';
+import { ClientSession } from 'mongoose';
 
 export interface RecordMovementInput {
   productId: string;
@@ -30,12 +31,13 @@ export class InventoryMovementsService {
     private readonly model: ReturnModelType<typeof InventoryMovements>,
   ) {}
 
-  async record(input: RecordMovementInput) {
+  async record(input: RecordMovementInput, session?: ClientSession) {
+    if (session) return (await this.model.create([input], { session }))[0];
     return this.model.create(input);
   }
 
-  async recordMany(inputs: RecordMovementInput[]) {
+  async recordMany(inputs: RecordMovementInput[], session?: ClientSession) {
     if (!inputs.length) return [];
-    return this.model.insertMany(inputs);
+    return this.model.insertMany(inputs, session ? { session } : undefined);
   }
 }

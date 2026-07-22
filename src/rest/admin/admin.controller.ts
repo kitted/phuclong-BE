@@ -22,6 +22,7 @@ import { DashboardController } from './controllers/dashboard.controller';
 import { InventoryController } from './controllers/inventory.controller';
 import { CustomersController } from './controllers/customers.controller';
 import { PromotionsController } from './controllers/promotions.controller';
+import { TruckTransfersController } from './controllers/truck-transfers.controller';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { PromotionsController } from './controllers/promotions.controller';
     InventoryController,
     CustomersController,
     PromotionsController,
+    TruckTransfersController,
   ],
 })
 export class AdminModule {}
