@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { TruckTransferType } from '../schemas/truck-transfers.schema';
 
 export enum TruckStatus { ACTIVE = 'active', INACTIVE = 'inactive' }
@@ -9,8 +9,7 @@ export class CreateTruckDto {
   @ApiPropertyOptional() @IsOptional() @IsString() code?: string;
   @ApiProperty() @IsString() @IsNotEmpty() name: string;
   @ApiProperty() @IsString() @IsNotEmpty() licensePlate: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() driver?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() phone?: string;
+  @ApiPropertyOptional({ type: String, nullable: true }) @IsOptional() @ValidateIf((_, value) => value !== null) @IsMongoId() driverId?: string | null;
   @ApiPropertyOptional({ enum: TruckStatus }) @IsOptional() @IsEnum(TruckStatus) status?: TruckStatus;
 }
 export class UpdateTruckDto extends PartialType(CreateTruckDto) {}
@@ -36,6 +35,8 @@ export class TruckListQueryDto {
   @ApiPropertyOptional() @IsOptional() search?: string;
   @ApiPropertyOptional({ enum: TruckStatus }) @IsOptional() @IsEnum(TruckStatus) status?: TruckStatus;
   @ApiPropertyOptional() @IsOptional() hasInventory?: string;
+  @ApiPropertyOptional() @IsOptional() @IsMongoId() driverId?: string;
+  @ApiPropertyOptional() @IsOptional() hasDriver?: string;
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
   @ApiPropertyOptional({ enum: ['createdAt', 'code', 'name'] }) @IsOptional() sortBy?: 'createdAt' | 'code' | 'name';
@@ -45,6 +46,12 @@ export class TruckListQueryDto {
 export class AvailableProductsQueryDto {
   @ApiPropertyOptional() @IsOptional() search?: string;
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
+  @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
+}
+
+export class AvailableDriversQueryDto {
+  @ApiPropertyOptional() @IsOptional() search?: string;
+  @ApiPropertyOptional() @IsOptional() @IsMongoId() excludeTruckId?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
 }
 

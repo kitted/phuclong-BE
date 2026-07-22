@@ -5,6 +5,7 @@ import { Trucks } from './schemas/trucks.schema';
 import { Products } from '../products/schemas/products.schema';
 import { TruckTransfers } from './schemas/truck-transfers.schema';
 import { InventoryMovementsService } from '../inventory/inventory-movements.service';
+import { Users } from '../users/schemas/users.schema';
 
 describe('TrucksService dependency injection', () => {
   it('uses the Typegoose connection token', async () => {
@@ -14,6 +15,7 @@ describe('TrucksService dependency injection', () => {
         { provide: getModelToken(Trucks.name), useValue: {} },
         { provide: getModelToken(Products.name), useValue: {} },
         { provide: getModelToken(TruckTransfers.name), useValue: {} },
+        { provide: getModelToken(Users.name), useValue: {} },
         { provide: InventoryMovementsService, useValue: {} },
         { provide: getConnectionToken(), useValue: { startSession: jest.fn() } },
       ],

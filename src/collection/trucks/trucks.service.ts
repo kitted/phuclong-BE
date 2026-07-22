@@ -9,6 +9,9 @@ import { AvailableProductsQueryDto, ChangeTruckStatusDto, CreateTruckDto, LoadGo
 import { ID } from '../../core/interfaces/id.interface';
 import { InventoryMovementsService } from '../inventory/inventory-movements.service';
 import { InventoryLocationType, InventoryMovementType } from '../inventory/schemas/inventory-movement.schema';
+import { Users, UserStatus } from '../users/schemas/users.schema';
+import { RoleEnum } from '../users/interfaces/role.enum';
+import { AvailableDriversQueryDto } from './dtos/trucks.dto';
 
 @Injectable()
 export class TrucksService {
@@ -16,6 +19,7 @@ export class TrucksService {
     @InjectModel(Trucks) private readonly model: ReturnModelType<typeof Trucks>,
     @InjectModel(Products) private readonly productModel: ReturnModelType<typeof Products>,
     @InjectModel(TruckTransfers) private readonly transferModel: ReturnModelType<typeof TruckTransfers>,
+    @InjectModel(Users) private readonly userModel: ReturnModelType<typeof Users>,
     private readonly movements: InventoryMovementsService,
     @Inject(getConnectionToken()) private readonly connection: Connection,
   ) {}
@@ -33,12 +37,41 @@ export class TrucksService {
     return `T${String(Number(latest?.code?.match(/\d+$/)?.[0] || 0) + 1).padStart(2, '0')}`;
   }
 
+  private async resolveDriver(driverId?: string | null, currentTruckId?: string) {
+    if (driverId === null) return { driverId: null, driverName: null, driverPhone: null };
+    if (driverId === undefined) return {};
+    if (!Types.ObjectId.isValid(driverId)) throw new BadRequestException('driverId không hợp lệ');
+    const employee: any = await this.userModel.findOne({
+      _id: driverId,
+      role: RoleEnum.STAFF,
+      status: UserStatus.ACTIVE,
+      isDeleted: false,
+    }).select('employeeCode fullName phone status').lean();
+    if (!employee) throw new BadRequestException('Nhân viên không hoạt động hoặc không thể được phân công làm tài xế');
+    const assigned: any = await this.model.findOne({
+      driverId,
+      isDeleted: false,
+      ...(currentTruckId ? { _id: { $ne: currentTruckId } } : {}),
+    }).select('code').lean();
+    if (assigned) throw new ConflictException(`Nhân viên ${employee.employeeCode || employee.fullName} đang được phân công cho xe ${assigned.code}`);
+    return { driverId: employee._id, driverName: employee.fullName || employee.employeeCode || '', driverPhone: employee.phone || '' };
+  }
+
   async create(dto: CreateTruckDto) {
     const code = dto.code?.trim().toUpperCase() || await this.nextCode();
     const licensePlate = this.normalizePlate(dto.licensePlate);
     if (await this.model.exists({ code, isDeleted: false })) throw new ConflictException('Mã xe đã tồn tại');
     if (await this.model.exists({ licensePlate, isDeleted: false })) throw new ConflictException('Biển số xe đã tồn tại');
-    const truck = await this.model.create({ ...dto, code, licensePlate, inventory: [] });
+    const driver = await this.resolveDriver(dto.driverId);
+    const { driverId: _driverId, ...safeDto } = dto as any;
+    delete safeDto.driver; delete safeDto.phone; delete safeDto.driverName; delete safeDto.driverPhone; delete safeDto.inventory;
+    let truck: any;
+    try {
+      truck = await this.model.create({ ...safeDto, ...driver, code, licensePlate, inventory: [] });
+    } catch (error: any) {
+      if (error?.code === 11000 && error?.keyPattern?.driverId) throw new ConflictException('Nhân viên đã được phân công cho xe khác');
+      throw error;
+    }
     return { data: truck };
   }
 
@@ -48,7 +81,13 @@ export class TrucksService {
     return new Map(products.map((product: any) => [String(product._id), product]));
   }
 
-  private mapTruck(truck: any, products: Map<string, any>, preview = false) {
+  private async driverMapFor(trucks: any[]) {
+    const ids = [...new Set(trucks.map((truck) => truck.driverId && String(truck.driverId)).filter(Boolean))];
+    const drivers = ids.length ? await this.userModel.find({ _id: { $in: ids }, isDeleted: false }).select('employeeCode fullName phone status').lean() : [];
+    return new Map(drivers.map((driver: any) => [String(driver._id), driver]));
+  }
+
+  private mapTruck(truck: any, products: Map<string, any>, preview = false, drivers = new Map<string, any>()) {
     const inventory = (truck.inventory || []).map((item) => {
       const product = products.get(String(item.productId)); const quantity = Number(item.qty) || 0; const costPrice = Number(product?.costPrice) || 0;
       return { productId: String(item.productId), code: product?.code || '', name: product?.name || '', unit: product?.unit || '', quantity, costPrice, stockValue: quantity * costPrice };
@@ -58,7 +97,9 @@ export class TrucksService {
       totalQuantity: inventory.reduce((sum, item) => sum + item.quantity, 0),
       totalValue: inventory.reduce((sum, item) => sum + item.stockValue, 0),
     };
-    const base = { id: String(truck._id), code: truck.code, name: truck.name, licensePlate: truck.licensePlate, driver: truck.driver, phone: truck.phone, status: truck.status, inventorySummary, createdAt: truck.createdAt, updatedAt: truck.updatedAt };
+    const assignedDriver = truck.driverId ? drivers.get(String(truck.driverId)) : null;
+    const driver = assignedDriver ? { id: String(assignedDriver._id), employeeCode: assignedDriver.employeeCode, fullName: assignedDriver.fullName, phone: assignedDriver.phone, status: assignedDriver.status, isDeleted: assignedDriver.isDeleted } : null;
+    const base = { id: String(truck._id), code: truck.code, name: truck.name, licensePlate: truck.licensePlate, driver, driverName: truck.driverName || truck.driver || '', driverPhone: truck.driverPhone || truck.phone || '', status: truck.status, inventorySummary, createdAt: truck.createdAt, updatedAt: truck.updatedAt };
     return preview ? { ...base, inventoryPreview: inventory.slice(0, 3) } : { ...base, inventory };
   }
 
@@ -66,9 +107,13 @@ export class TrucksService {
     const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100);
     const filter: any = { isDeleted: false };
     if (query.status) filter.status = query.status;
+    if (query.driverId) filter.driverId = query.driverId;
+    if (query.hasDriver === 'true') filter.driverId = { $type: 'objectId' };
+    if (query.hasDriver === 'false') filter.$and = [{ $or: [{ driverId: null }, { driverId: { $exists: false } }] }];
     if (query.search?.trim()) {
       const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter.$or = ['code', 'name', 'licensePlate', 'driver', 'phone'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
+      const searchFilter = ['code', 'name', 'licensePlate', 'driverName', 'driverPhone', 'driver', 'phone'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
+      if (filter.$and) filter.$and.push({ $or: searchFilter }); else filter.$or = searchFilter;
     }
     if (query.hasInventory === 'true') filter.$expr = { $gt: [{ $sum: '$inventory.qty' }, 0] };
     if (query.hasInventory === 'false') filter.$expr = { $lte: [{ $sum: '$inventory.qty' }, 0] };
@@ -77,18 +122,19 @@ export class TrucksService {
       this.model.find(filter).sort({ [sortBy]: direction }).skip((page - 1) * limit).limit(limit).lean(),
       this.model.countDocuments(filter),
     ]);
-    const products = await this.productMapFor(trucks);
-    return { data: trucks.map((truck) => this.mapTruck(truck, products, true)), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+    const [products, drivers] = await Promise.all([this.productMapFor(trucks), this.driverMapFor(trucks)]);
+    return { data: trucks.map((truck) => this.mapTruck(truck, products, true, drivers)), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }
 
   async summary() {
-    const trucks = await this.model.find({ isDeleted: false }).select('status inventory').lean();
+    const trucks = await this.model.find({ isDeleted: false }).select('status inventory driverId').lean();
     const products = await this.productMapFor(trucks); const mapped = trucks.map((truck) => this.mapTruck(truck, products));
     return { data: {
       totalTrucks: trucks.length,
       activeTrucks: trucks.filter((truck) => truck.status === TruckStatus.ACTIVE).length,
       inactiveTrucks: trucks.filter((truck) => truck.status === TruckStatus.INACTIVE).length,
       trucksWithInventory: mapped.filter((truck) => truck.inventorySummary.totalQuantity > 0).length,
+      trucksWithoutDriver: trucks.filter((truck) => !truck.driverId).length,
       totalTruckQuantity: mapped.reduce((sum, truck) => sum + truck.inventorySummary.totalQuantity, 0),
       totalTruckInventoryValue: mapped.reduce((sum, truck) => sum + truck.inventorySummary.totalValue, 0),
     } };
@@ -97,11 +143,13 @@ export class TrucksService {
   async findOne(id: ID | string) {
     const truck = await this.model.findOne({ _id: id, isDeleted: false }).lean();
     if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
-    return { data: this.mapTruck(truck, await this.productMapFor([truck])) };
+    const [products, drivers] = await Promise.all([this.productMapFor([truck]), this.driverMapFor([truck])]);
+    return { data: this.mapTruck(truck, products, false, drivers) };
   }
 
   async update(id: ID | string, dto: UpdateTruckDto) {
     const update: any = { ...dto };
+    delete update.driver; delete update.phone; delete update.driverName; delete update.driverPhone; delete update.inventory;
     if (dto.code) {
       update.code = dto.code.trim().toUpperCase();
       if (await this.model.exists({ code: update.code, _id: { $ne: id }, isDeleted: false })) throw new ConflictException('Mã xe đã tồn tại');
@@ -110,7 +158,15 @@ export class TrucksService {
       update.licensePlate = this.normalizePlate(dto.licensePlate);
       if (await this.model.exists({ licensePlate: update.licensePlate, _id: { $ne: id }, isDeleted: false })) throw new ConflictException('Biển số xe đã tồn tại');
     }
-    const truck = await this.model.findOneAndUpdate({ _id: id, isDeleted: false }, update, { new: true, runValidators: true });
+    if (Object.prototype.hasOwnProperty.call(dto, 'driverId')) Object.assign(update, await this.resolveDriver(dto.driverId, String(id)));
+    else delete update.driverId;
+    let truck: any;
+    try {
+      truck = await this.model.findOneAndUpdate({ _id: id, isDeleted: false }, update, { new: true, runValidators: true });
+    } catch (error: any) {
+      if (error?.code === 11000 && error?.keyPattern?.driverId) throw new ConflictException('Nhân viên đã được phân công cho xe khác');
+      throw error;
+    }
     if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
     return { data: truck };
   }
@@ -139,6 +195,23 @@ export class TrucksService {
     }
     const [products, totalItems] = await Promise.all([this.productModel.find(filter).sort({ code: 1 }).skip((page - 1) * limit).limit(limit).lean(), this.productModel.countDocuments(filter)]);
     return { data: products.map((product: any) => ({ productId: String(product._id), code: product.code, name: product.name, unit: product.unit || '', warehouseQuantity: product.stock || 0, costPrice: product.costPrice || 0 })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+  }
+
+  async availableDrivers(query: AvailableDriversQueryDto) {
+    const limit = this.positiveInt(query.limit, 20, 100);
+    const assignments = await this.model.find({ isDeleted: false }).select('code name driverId').lean();
+    const blockedIds = assignments
+      .filter((truck) => truck.driverId && String(truck._id) !== query.excludeTruckId)
+      .map((truck) => truck.driverId);
+    const filter: any = { role: RoleEnum.STAFF, status: UserStatus.ACTIVE, isDeleted: false };
+    if (blockedIds.length) filter._id = { $nin: blockedIds };
+    if (query.search?.trim()) {
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = ['employeeCode', 'fullName', 'phone'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
+    }
+    const employees = await this.userModel.find(filter).select('employeeCode fullName phone status').sort({ employeeCode: 1 }).limit(limit).lean();
+    const assignmentByDriver = new Map(assignments.filter((truck) => truck.driverId).map((truck) => [String(truck.driverId), { id: String(truck._id), code: truck.code, name: truck.name }]));
+    return { data: employees.map((employee: any) => ({ id: String(employee._id), employeeCode: employee.employeeCode, fullName: employee.fullName, phone: employee.phone, status: employee.status, assignedTruck: assignmentByDriver.get(String(employee._id)) || null })) };
   }
 
   private mergedItems(items: Array<{ productId: string; qty: number }>) {
@@ -172,6 +245,12 @@ export class TrucksService {
         const truck: any = await this.model.findOne({ _id: truckId, isDeleted: false }).session(session);
         if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
         if (type === TruckTransferType.LOAD && truck.status !== TruckStatus.ACTIVE) throw new ConflictException('Xe ngừng hoạt động không thể nhận hàng');
+        const driver: any = truck.driverId
+          ? await this.userModel.findOne({ _id: truck.driverId, isDeleted: false }).select('employeeCode fullName phone role status').session(session).lean()
+          : null;
+        if (type === TruckTransferType.LOAD && (!driver || driver.role !== RoleEnum.STAFF || driver.status !== UserStatus.ACTIVE)) {
+          throw new ConflictException('Tài xế của xe không còn hoạt động hoặc chưa được phân công, vui lòng phân công lại');
+        }
         if (await this.transferModel.exists({ code }).session(session)) throw new ConflictException('Mã phiếu điều chuyển đã tồn tại');
         const snapshots: any[] = []; const movementInputs: any[] = [];
         for (const item of items) {
@@ -205,7 +284,14 @@ export class TrucksService {
         }
         if (type === TruckTransferType.RETURN) await this.model.updateOne({ _id: truckId }, { $pull: { inventory: { qty: { $lte: 0 } } } }, { session });
         const totalQuantity = snapshots.reduce((sum, item) => sum + item.qty, 0); const totalValue = snapshots.reduce((sum, item) => sum + item.qty * item.unitCost, 0);
-        const transfer: any = (await this.transferModel.create([{ code, type, truckId, truckCode: truck.code, truckName: truck.name, date, note: dto.note, items: snapshots, totalQuantity, totalValue, createdBy: createdBy || undefined }], { session }))[0];
+        const transfer: any = (await this.transferModel.create([{
+          code, type, truckId, truckCode: truck.code, truckName: truck.name,
+          driverId: truck.driverId || undefined,
+          driverCode: driver?.employeeCode,
+          driverName: truck.driverName || driver?.fullName || truck.driver,
+          driverPhone: truck.driverPhone || driver?.phone || truck.phone,
+          date, note: dto.note, items: snapshots, totalQuantity, totalValue, createdBy: createdBy || undefined,
+        }], { session }))[0];
         await this.movements.recordMany(movementInputs.map((movement) => ({ ...movement, referenceType: type === TruckTransferType.LOAD ? 'TRUCK_LOAD' : 'TRUCK_RETURN', referenceId: String(transfer._id), referenceCode: code })), session);
         const updatedTruck: any = await this.model.findById(truckId).session(session).lean(); const products = await this.productMapFor([updatedTruck]);
         result = { data: { transfer: this.mapTransfer(transfer.toObject()), truck: this.mapTruck(updatedTruck, products) } };
@@ -216,7 +302,7 @@ export class TrucksService {
 
   private mapTransfer(transfer: any) {
     const creator = transfer.createdBy;
-    return { id: String(transfer._id), code: transfer.code, type: transfer.type, date: transfer.date, truck: { id: String(transfer.truckId), code: transfer.truckCode, name: transfer.truckName }, totalQuantity: transfer.totalQuantity, totalValue: transfer.totalValue, note: transfer.note, items: (transfer.items || []).map((item) => ({ productId: String(item.productId), productCode: item.productCode, productName: item.productName, unit: item.unit || '', qty: item.qty, unitCost: item.unitCost, stockValue: item.qty * item.unitCost })), createdBy: creator ? { id: String(creator._id || creator), fullName: creator.fullName || creator.username } : null, createdAt: transfer.createdAt };
+    return { id: String(transfer._id), code: transfer.code, type: transfer.type, date: transfer.date, truck: { id: String(transfer.truckId), code: transfer.truckCode, name: transfer.truckName }, driver: transfer.driverId || transfer.driverName ? { id: transfer.driverId ? String(transfer.driverId) : null, employeeCode: transfer.driverCode, fullName: transfer.driverName, phone: transfer.driverPhone } : null, totalQuantity: transfer.totalQuantity, totalValue: transfer.totalValue, note: transfer.note, items: (transfer.items || []).map((item) => ({ productId: String(item.productId), productCode: item.productCode, productName: item.productName, unit: item.unit || '', qty: item.qty, unitCost: item.unitCost, stockValue: item.qty * item.unitCost })), createdBy: creator ? { id: String(creator._id || creator), fullName: creator.fullName || creator.username } : null, createdAt: transfer.createdAt };
   }
 
   async findTransfers(query: TruckTransferQueryDto): Promise<any> {

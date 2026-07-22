@@ -12,4 +12,13 @@ describe('truck schemas', () => {
     expect(schema.path('code').options.unique).toBe(true);
     expect(schema.path('licensePlate').options.unique).toBe(true);
   });
+
+  it('allows one active truck assignment per driver', () => {
+    const indexes = buildSchema(Trucks).indexes();
+    const driverIndex = indexes.find(([fields]) => fields.driverId === 1);
+    expect(driverIndex?.[1]).toMatchObject({
+      unique: true,
+      partialFilterExpression: { driverId: { $type: 'objectId' }, isDeleted: false },
+    });
+  });
 });

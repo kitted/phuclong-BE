@@ -4,7 +4,7 @@ import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { TrucksService } from '../../../collection/trucks/trucks.service';
-import { AvailableProductsQueryDto, ChangeTruckStatusDto, CreateTruckDto, LoadGoodsDto, ReturnGoodsDto, TruckListQueryDto, UpdateTruckDto } from '../../../collection/trucks/dtos/trucks.dto';
+import { AvailableDriversQueryDto, AvailableProductsQueryDto, ChangeTruckStatusDto, CreateTruckDto, LoadGoodsDto, ReturnGoodsDto, TruckListQueryDto, UpdateTruckDto } from '../../../collection/trucks/dtos/trucks.dto';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
 
 @WarehouseController(['trucks'])
@@ -22,6 +22,9 @@ export class TrucksController {
 
   @Get('available-products') @ApiOperation({ summary: 'Get warehouse products available to load' })
   availableProducts(@Query() query: AvailableProductsQueryDto) { return this.service.availableProducts(query); }
+
+  @Get('available-drivers') @ApiOperation({ summary: 'Get active staff available for truck assignment' })
+  availableDrivers(@Query() query: AvailableDriversQueryDto) { return this.service.availableDrivers(query); }
 
   @Get(':id') @ApiOperation({ summary: 'Get truck and full inventory' })
   findOne(@Param('id', ParseIdPipe) id: ID) { return this.service.findOne(id); }

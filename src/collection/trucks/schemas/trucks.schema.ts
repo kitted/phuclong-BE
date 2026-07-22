@@ -1,6 +1,7 @@
 import { BaseModel } from '../../../core/base.model';
-import { prop, Ref } from '@typegoose/typegoose';
+import { index, prop, Ref } from '@typegoose/typegoose';
 import { Products } from 'src/collection/products/schemas/products.schema';
+import { Users } from '../../users/schemas/users.schema';
 
 export class TruckInventory {
   @prop({ ref: () => Products, required: true })
@@ -10,6 +11,10 @@ export class TruckInventory {
   qty: number;
 }
 
+@index(
+  { driverId: 1 },
+  { unique: true, partialFilterExpression: { driverId: { $type: 'objectId' }, isDeleted: false } },
+)
 export class Trucks extends BaseModel {
   @prop({ unique: true, required: true })
   code: string;
@@ -25,6 +30,15 @@ export class Trucks extends BaseModel {
 
   @prop()
   phone?: string;
+
+  @prop({ ref: () => Users, default: null })
+  driverId?: Ref<Users>;
+
+  @prop({ trim: true })
+  driverName?: string;
+
+  @prop({ trim: true })
+  driverPhone?: string;
 
   @prop({ default: 'active', enum: ['active', 'inactive'] })
   status: string;
