@@ -16,6 +16,10 @@ import { RoleEnum } from '../users/interfaces/role.enum';
 import { ID } from '../../core/interfaces/id.interface';
 import { Categories } from '../categories/schemas/categories.schema';
 import { PromotionRuleEngineService } from './promotion-rule-engine.service';
+import { PromotionActivationsService } from '../promotion-activations/promotion-activations.service';
+import { PromotionActivations, PromotionActivationStatus } from '../promotion-activations/schemas/promotion-activations.schema';
+import { InvoiceQueryDto } from './dtos/invoices.dto';
+import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
 
 type Actor = { id?: string; role?: RoleEnum };
 
@@ -31,8 +35,10 @@ export class InvoicesService {
     @InjectModel(Vouchers) private readonly voucherModel: ReturnModelType<typeof Vouchers>,
     @InjectModel(InvoiceCounters) private readonly counterModel: ReturnModelType<typeof InvoiceCounters>,
     @InjectModel(Categories) private readonly categoryModel: ReturnModelType<typeof Categories>,
+    @InjectModel(PromotionActivations) private readonly activationModel: ReturnModelType<typeof PromotionActivations>,
     private readonly movements: InventoryMovementsService,
     private readonly ruleEngine: PromotionRuleEngineService,
+    private readonly activations: PromotionActivationsService,
     @Inject(getConnectionToken()) private readonly connection: Connection,
   ) {}
 
@@ -56,7 +62,7 @@ export class InvoicesService {
     const productMap = new Map(products.map((product) => [String(product._id), product]));
     const items = requested.map((item) => {
       const product: any = productMap.get(item.productId); const price = Number(product.sellPrice) || 0;
-      return { productId: item.productId, productCode: product.code, productName: product.name, productType: product.productType || (product.categoryId ? categoryMap.get(String(product.categoryId)) : ''), brandId: product.brandId, unit: product.unit || '', categoryId: product.categoryId ? String(product.categoryId) : null, qty: item.qty, price, lineTotal: price * item.qty, lineType: InvoiceLineType.SALE, originalPrice: price };
+      return { productId: item.productId, productCode: product.code, productName: product.name, productType: product.productType || (product.categoryId ? categoryMap.get(String(product.categoryId)) : ''), brandId: product.brandId, unit: product.unit || '', categoryId: product.categoryId ? String(product.categoryId) : null, categoryName: product.categoryId ? categoryMap.get(String(product.categoryId)) || '' : '', qty: item.qty, price, lineTotal: price * item.qty, lineType: InvoiceLineType.SALE, originalPrice: price };
     });
     const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
     let discountAmount = 0; let promotion: any = null; let voucher: any = null; let eligibleItems: any[] = [];
@@ -188,6 +194,8 @@ export class InvoicesService {
           salespersonId: salesperson._id, salespersonCode: salesperson.employeeCode || '', salespersonName: salesperson.fullName || salesperson.username,
           createdBy: actor.id || undefined,
         }], { session }))[0];
+        const activation: any = giftApplication && customer ? await this.activations.createForInvoice({ promotion: giftApplication.promotion, invoice, customer, salesperson, date }, session) : null;
+        if (activation) await this.model.updateOne({ _id: invoice._id, 'promotionApplications.promotionId': giftApplication.promotion._id }, { $set: { 'promotionApplications.$.activationId': String(activation._id), 'promotionApplications.$.activationCode': activation.code } }, { session });
         if (calculated.voucher) {
           const claimed = await this.voucherModel.findOneAndUpdate({ _id: calculated.voucher._id, status: VoucherStatus.ACTIVE }, { status: VoucherStatus.USED, usedAt: new Date(), orderReference: code, invoiceId: String(invoice._id) }, { new: true, session });
           if (!claimed) throw new ConflictException('Voucher đã được sử dụng bởi giao dịch khác');
@@ -201,14 +209,47 @@ export class InvoicesService {
           if (!debtUpdated) throw new ConflictException({ code: 'CUSTOMER_DEBT_LIMIT_EXCEEDED', message: 'Công nợ khách hàng vừa thay đổi và đã vượt hạn mức' });
         }
         await this.movements.recordMany(movementInputs.map((movement) => ({ ...movement, referenceType: 'INVOICE', referenceId: String(invoice._id), referenceCode: code })), session);
-        response = { data: { id: String(invoice._id), code, subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, paidAmount, debtAmount, paymentStatus } };
+        response = { data: { id: String(invoice._id), code, subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, paidAmount, debtAmount, paymentStatus, promotionActivations: activation ? [{ id: String(activation._id), code: activation.code, status: activation.status }] : [] } };
       });
       return response;
     } finally { await session.endSession(); }
   }
 
-  async findAll(): Promise<any> {
-    return this.model.find({ isDeleted: false }).select('-__v').sort({ date: -1 }).populate('customerId', 'code name phone').populate('salespersonId', 'employeeCode fullName').lean();
+  private async invoiceFilter(query: InvoiceQueryDto): Promise<any> {
+    const filter: any = { isDeleted: false };
+    if (query.salespersonId) filter.salespersonId = query.salespersonId;
+    if (query.paymentStatus) filter.paymentStatus = query.paymentStatus;
+    if (query.from || query.to) { filter.date = {}; if (query.from) filter.date.$gte = vietnamDateBoundary(query.from, false); if (query.to) filter.date.$lte = vietnamDateBoundary(query.to, true); }
+    if (query.search?.trim()) {
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = { $regex: escaped, $options: 'i' };
+      const [customers, activations] = await Promise.all([
+        this.customerModel.find({ isDeleted: false, $or: [{ code: regex }, { name: regex }, { phone: regex }] }).select('_id').limit(500).lean(),
+        this.activationModel.find({ isDeleted: false, code: regex }).select('invoiceId').limit(500).lean(),
+      ]);
+      filter.$or = [{ code: regex }, { customer: regex }, { customerId: { $in: customers.map((item: any) => item._id) } }, { _id: { $in: activations.map((item: any) => item.invoiceId) } }, { 'promotionApplications.activationCode': regex }];
+    }
+    return filter;
+  }
+
+  async findAll(query: InvoiceQueryDto = {}): Promise<any> {
+    const page = Math.max(1, Number(query.page) || 1); const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
+    const filter = await this.invoiceFilter(query);
+    const [rows, total] = await Promise.all([this.model.find(filter).select('-__v').sort({ date: -1 }).skip((page - 1) * limit).limit(limit).populate('customerId', 'code name phone').populate('salespersonId', 'employeeCode fullName').lean(), this.model.countDocuments(filter)]);
+    const invoiceIds = rows.map((row: any) => row._id); const activations: any[] = invoiceIds.length ? await this.activationModel.find({ invoiceId: { $in: invoiceIds }, isDeleted: false }).select('invoiceId code status activatedAt').lean() : [];
+    const byInvoice = new Map<string, any[]>(); for (const activation of activations) { const key = String(activation.invoiceId); byInvoice.set(key, [...(byInvoice.get(key) || []), activation]); }
+    return { data: rows.map((row: any) => ({ ...row, id: String(row._id), activationCodes: byInvoice.get(String(row._id)) || [] })), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
+
+  async summary(query: InvoiceQueryDto): Promise<any> {
+    const filter = await this.invoiceFilter({ ...query, search: undefined, page: undefined, limit: undefined });
+    const [values, customers, activationCount] = await Promise.all([
+      this.model.aggregate([{ $match: filter }, { $group: { _id: null, invoiceCount: { $sum: 1 }, grossRevenue: { $sum: '$subtotal' }, discountAmount: { $sum: '$discountAmount' }, netRevenue: { $sum: '$grandTotal' }, paidAmount: { $sum: '$paidAmount' }, debtAmount: { $sum: '$debtAmount' } } }]),
+      this.model.distinct('customerId', { ...filter, customerId: { $ne: null } }),
+      this.activationModel.countDocuments({ isDeleted: false, status: PromotionActivationStatus.ACTIVE, ...(query.salespersonId ? { salespersonId: query.salespersonId } : {}), ...((query.from || query.to) ? { activatedAt: { ...(query.from ? { $gte: vietnamDateBoundary(query.from, false) } : {}), ...(query.to ? { $lte: vietnamDateBoundary(query.to, true) } : {}) } } : {}) }),
+    ]);
+    const row = values[0] || {};
+    return { data: { invoiceCount: row.invoiceCount || 0, grossRevenue: row.grossRevenue || 0, discountAmount: row.discountAmount || 0, netRevenue: row.netRevenue || 0, paidAmount: row.paidAmount || 0, debtAmount: row.debtAmount || 0, uniqueCustomers: customers.length, promotionActivationCount: activationCount } };
   }
 
   async findOne(id: ID | string): Promise<any> {

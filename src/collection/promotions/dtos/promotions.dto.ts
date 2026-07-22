@@ -53,6 +53,7 @@ export class CreatePromotionDto {
   @ApiPropertyOptional() @IsOptional() @IsString() productType?: string;
   @ApiPropertyOptional({ type: [String] }) @IsOptional() @IsArray() productIds?: string[];
   @ApiPropertyOptional() @IsOptional() @IsString() voucherPrefix?: string;
+  @ApiPropertyOptional({ description: 'Short stable prefix used to generate promotion activation codes' }) @IsOptional() @IsString() activationPrefix?: string;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) quantity?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) usageLimitPerCustomer?: number;
   @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0) minOrderValue?: number;
@@ -70,6 +71,13 @@ export class PromotionQueryDto {
   @ApiPropertyOptional() @IsOptional() search?: string;
   @ApiPropertyOptional({ enum: PromotionStatus }) @IsOptional() @IsEnum(PromotionStatus) status?: PromotionStatus;
   @ApiPropertyOptional({ enum: PromotionType }) @IsOptional() @IsEnum(PromotionType) type?: PromotionType;
+  @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
+  @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
+}
+export class PromotionOptionsQueryDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
+  @ApiPropertyOptional({ description: 'Comma-separated promotion types' }) @IsOptional() @IsString() types?: string;
+  @ApiPropertyOptional({ description: 'Comma-separated promotion statuses' }) @IsOptional() @IsString() statuses?: string;
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
 }

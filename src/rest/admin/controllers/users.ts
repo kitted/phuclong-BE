@@ -6,10 +6,12 @@ import { AdminController } from '../decorators/swagger';
 import { UsersService } from 'src/collection/users/users.service';
 import { ChangeUserStatusDto, CreateUserDto, UpdateUserDto, UserListQueryDto } from 'src/collection/users/dtos/create-user.dto';
 import { AuthRequest } from 'src/collection/auth/interfaces/authRequest.interface';
+import { EmployeeKpisService } from 'src/collection/employee-kpis/employee-kpis.service';
+import { EmployeeKpiQueryDto } from 'src/collection/employee-kpis/dtos/employee-kpis.dto';
 
 @AdminController(['users'])
 export class UsersController {
-  constructor(private readonly service: UsersService) {}
+  constructor(private readonly service: UsersService, private readonly kpis: EmployeeKpisService) {}
 
   @ApiOperation({ summary: 'create' })
   @Post()
@@ -40,6 +42,10 @@ export class UsersController {
   salesKpi(@Param('id', ParseIdPipe) id: ID, @Query('from') from?: string, @Query('to') to?: string) {
     return this.service.salesKpi(String(id), from, to);
   }
+
+  @ApiOperation({ summary: 'Get employee KPI assignments' })
+  @Get(':id/kpis')
+  employeeKpis(@Param('id', ParseIdPipe) id: ID, @Query() query: EmployeeKpiQueryDto): Promise<any> { return this.kpis.listForEmployee(String(id), query); }
 
   @ApiOperation({ summary: 'Update employee' })
   @Patch(':id')

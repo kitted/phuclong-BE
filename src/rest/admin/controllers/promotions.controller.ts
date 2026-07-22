@@ -1,7 +1,7 @@
 import { Body, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
 import { PromotionsService } from '../../../collection/promotions/promotions.service';
-import { AssignVoucherDto, ChangePromotionStatusDto, CreatePromotionDto, PromotionQueryDto, UpdatePromotionDto, UseVoucherDto } from '../../../collection/promotions/dtos/promotions.dto';
+import { AssignVoucherDto, ChangePromotionStatusDto, CreatePromotionDto, PromotionOptionsQueryDto, PromotionQueryDto, UpdatePromotionDto, UseVoucherDto } from '../../../collection/promotions/dtos/promotions.dto';
 import { WarehouseController } from '../decorators/warehouse';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
@@ -15,6 +15,9 @@ export class PromotionsController {
 
   @Get('summary') @ApiOperation({ summary: 'Get promotion KPI summary' })
   summary() { return this.service.summary(); }
+
+  @Get('options') @ApiOperation({ summary: 'Get lightweight promotion options for autocomplete' })
+  options(@Query() query: PromotionOptionsQueryDto): Promise<any> { return this.service.options(query); }
 
   @Get(':id') @ApiOperation({ summary: 'Get promotion detail' })
   findOne(@Param('id', ParseIdPipe) id: ID): Promise<any> { return this.service.findOne(String(id)); }

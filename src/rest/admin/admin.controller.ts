@@ -10,6 +10,8 @@ import { DashboardModule } from 'src/collection/dashboard/dashboard.module';
 import { InventoryModule } from 'src/collection/inventory/inventory.module';
 import { CustomersModule } from 'src/collection/customers/customers.module';
 import { PromotionsModule } from 'src/collection/promotions/promotions.module';
+import { PromotionActivationsModule } from 'src/collection/promotion-activations/promotion-activations.module';
+import { EmployeeKpisModule } from 'src/collection/employee-kpis/employee-kpis.module';
 
 import { UsersController } from './controllers/users';
 import { CategoriesController } from './controllers/categories.controller';
@@ -23,6 +25,8 @@ import { InventoryController } from './controllers/inventory.controller';
 import { CustomersController } from './controllers/customers.controller';
 import { PromotionsController } from './controllers/promotions.controller';
 import { TruckTransfersController } from './controllers/truck-transfers.controller';
+import { PromotionActivationsController } from './controllers/promotion-activations.controller';
+import { EmployeeKpisController } from './controllers/employee-kpis.controller';
 
 @Module({
   imports: [
@@ -37,6 +41,8 @@ import { TruckTransfersController } from './controllers/truck-transfers.controll
     InventoryModule,
     CustomersModule,
     PromotionsModule,
+    PromotionActivationsModule,
+    EmployeeKpisModule,
   ],
   controllers: [
     UsersController,
@@ -51,6 +57,8 @@ import { TruckTransfersController } from './controllers/truck-transfers.controll
     CustomersController,
     PromotionsController,
     TruckTransfersController,
+    PromotionActivationsController,
+    EmployeeKpisController,
   ],
 })
 export class AdminModule {}

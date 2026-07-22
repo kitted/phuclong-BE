@@ -59,6 +59,8 @@ export class PromotionContributionRule {
   @prop({ min: 0 }) maxQuantity?: number;
 }
 
+@index({ type: 1, status: 1, startAt: 1, endAt: 1 })
+@index({ activationPrefix: 1 })
 export class Promotions extends BaseModel {
   @prop({ required: true, unique: true }) code: string;
   @prop({ required: true }) name: string;
@@ -71,6 +73,7 @@ export class Promotions extends BaseModel {
   @prop() productType?: string;
   @prop({ ref: () => Products, type: () => [Types.ObjectId], default: [] }) productIds: Ref<Products>[];
   @prop() voucherPrefix?: string;
+  @prop() activationPrefix?: string;
   @prop({ default: 0, min: 0 }) quantity: number;
   @prop({ default: 0, min: 0 }) activated: number;
   @prop({ default: 0, min: 0 }) used: number;

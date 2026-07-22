@@ -6,10 +6,12 @@ import { WarehouseController } from '../decorators/warehouse';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { Response } from 'express';
+import { PromotionActivationsService } from '../../../collection/promotion-activations/promotion-activations.service';
+import { PromotionActivationQueryDto } from '../../../collection/promotion-activations/dtos/promotion-activations.dto';
 
 @WarehouseController(['customers'])
 export class CustomersController {
-  constructor(private readonly service: CustomersService) {}
+  constructor(private readonly service: CustomersService, private readonly activations: PromotionActivationsService) {}
 
   @Get() @ApiOperation({ summary: 'Search and filter customers' })
   findAll(@Query() query: CustomerQueryDto): Promise<any> { return this.service.findAll(query); }
@@ -27,6 +29,9 @@ export class CustomersController {
     });
     return new StreamableFile(file);
   }
+
+  @Get(':id/promotion-activations') @ApiOperation({ summary: 'Get promotion activations of customer' })
+  activationsOfCustomer(@Param('id', ParseIdPipe) id: ID, @Query() query: PromotionActivationQueryDto): Promise<any> { return this.activations.findAll({ ...query, customerId: String(id) }); }
 
   @Post('import') @ApiOperation({ summary: 'Bulk upsert customers parsed from Excel by phone' })
   import(@Body() dto: ImportCustomersDto) { return this.service.importRows(dto.rows); }

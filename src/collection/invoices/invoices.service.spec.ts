@@ -11,15 +11,18 @@ import { Promotions, Vouchers } from '../promotions/schemas/promotions.schema';
 import { InventoryMovementsService } from '../inventory/inventory-movements.service';
 import { Categories } from '../categories/schemas/categories.schema';
 import { PromotionRuleEngineService } from './promotion-rule-engine.service';
+import { PromotionActivationsService } from '../promotion-activations/promotion-activations.service';
+import { PromotionActivations } from '../promotion-activations/schemas/promotion-activations.schema';
 
 describe('InvoicesService dependency injection', () => {
   it('resolves all transaction models and the Typegoose connection', async () => {
-    const models = [Invoices, InvoiceCounters, Products, Trucks, Customers, Users, Promotions, Vouchers, Categories];
+    const models = [Invoices, InvoiceCounters, Products, Trucks, Customers, Users, Promotions, Vouchers, Categories, PromotionActivations];
     const module = await Test.createTestingModule({ providers: [
       InvoicesService,
       ...models.map((model) => ({ provide: getModelToken(model.name), useValue: {} })),
       { provide: InventoryMovementsService, useValue: {} },
       { provide: PromotionRuleEngineService, useValue: {} },
+      { provide: PromotionActivationsService, useValue: {} },
       { provide: getConnectionToken(), useValue: { startSession: jest.fn() } },
     ] }).compile();
     expect(module.get(InvoicesService)).toBeDefined();

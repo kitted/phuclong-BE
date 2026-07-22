@@ -23,6 +23,13 @@ export class InvoiceItem {
   @prop({ required: true }) productCode: string;
   @prop({ required: true }) productName: string;
   @prop() unit?: string;
+  @prop() categoryId?: string;
+  @prop() categoryCode?: string;
+  @prop() categoryName?: string;
+  @prop() brandId?: string;
+  @prop() brandCode?: string;
+  @prop() brandName?: string;
+  @prop() productType?: string;
   @prop({ required: true, min: 1 }) qty: number;
   @prop({ required: true, min: 0 }) price: number;
   @prop({ required: true, min: 0 }) lineTotal: number;
@@ -61,9 +68,12 @@ export class InvoicePromotionApplication {
   @prop({ required: true, min: 1 }) applicationCount: number;
   @prop({ type: () => [InvoiceMatchedConditionGroup], default: [] }) matchedConditions: InvoiceMatchedConditionGroup[];
   @prop({ type: () => [InvoicePromotionGift], default: [] }) gifts: InvoicePromotionGift[];
+  @prop() activationId?: string;
+  @prop() activationCode?: string;
 }
 
 @index({ salespersonId: 1, date: -1 })
+@index({ salespersonId: 1, paymentStatus: 1, date: -1 })
 @index({ promotionId: 1, date: -1 })
 export class Invoices extends BaseModel {
   @prop({ required: true, unique: true }) code: string;

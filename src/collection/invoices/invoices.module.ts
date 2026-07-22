@@ -11,9 +11,11 @@ import { Promotions, Vouchers } from '../promotions/schemas/promotions.schema';
 import { InvoiceCounters } from './schemas/invoice-counter.schema';
 import { Categories } from '../categories/schemas/categories.schema';
 import { PromotionRuleEngineService } from './promotion-rule-engine.service';
+import { PromotionActivationsModule } from '../promotion-activations/promotion-activations.module';
+import { PromotionActivations } from '../promotion-activations/schemas/promotion-activations.schema';
 
 @Module({
-  imports: [TypegooseModule.forFeature([Invoices, Products, Trucks, Customers, Users, Promotions, Vouchers, InvoiceCounters, Categories]), InventoryMovementsModule],
+  imports: [TypegooseModule.forFeature([Invoices, Products, Trucks, Customers, Users, Promotions, Vouchers, InvoiceCounters, Categories, PromotionActivations]), InventoryMovementsModule, PromotionActivationsModule],
   providers: [InvoicesService, PromotionRuleEngineService],
   exports: [InvoicesService],
 })

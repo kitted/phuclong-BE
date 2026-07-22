@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 import { CustomerSegment, CustomerSource } from '../schemas/customers.schema';
+import { Transform } from 'class-transformer';
 
 export class CreateCustomerDto {
   @ApiProperty() @IsString() @IsNotEmpty() name: string;
@@ -20,7 +21,7 @@ export class CustomerQueryDto {
   @ApiPropertyOptional({ enum: CustomerSource }) @IsOptional() @IsEnum(CustomerSource) source?: CustomerSource;
   @ApiPropertyOptional({ enum: CustomerSegment }) @IsOptional() @IsEnum(CustomerSegment) segment?: CustomerSegment;
   @ApiPropertyOptional() @IsOptional() zaloConnected?: string;
-  @ApiPropertyOptional() @IsOptional() debtWarning?: string;
+  @ApiPropertyOptional({ type: Boolean }) @Transform(({ value }) => value === true || value === 'true') @IsOptional() @IsBoolean() debtWarning?: boolean;
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
 }

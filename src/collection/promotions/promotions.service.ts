@@ -4,7 +4,7 @@ import { InjectModel } from 'nestjs-typegoose';
 import { Categories } from '../categories/schemas/categories.schema';
 import { Products } from '../products/schemas/products.schema';
 import { Customers } from '../customers/schemas/customers.schema';
-import { AssignVoucherDto, CreatePromotionDto, PromotionQueryDto, UpdatePromotionDto, UseVoucherDto } from './dtos/promotions.dto';
+import { AssignVoucherDto, CreatePromotionDto, PromotionOptionsQueryDto, PromotionQueryDto, UpdatePromotionDto, UseVoucherDto } from './dtos/promotions.dto';
 import { DiscountType, GiftSelectionMode, Promotions, PromotionConditionMetric, PromotionScope, PromotionStatus, PromotionType, Vouchers, VoucherStatus } from './schemas/promotions.schema';
 import { Invoices } from '../invoices/schemas/invoices.schema';
 import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
@@ -33,6 +33,7 @@ export class PromotionsService {
     if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) throw new BadRequestException('Thời gian kết thúc phải sau thời gian bắt đầu');
     const isDiscount = [PromotionType.VOUCHER, PromotionType.AUTO_DISCOUNT].includes(data.type);
     const isGift = [PromotionType.BUY_X_GET_Y, PromotionType.BUNDLE_GIFT].includes(data.type);
+    if (data.activationPrefix && !String(data.activationPrefix).replace(/[^A-Z0-9]/gi, '')) throw new BadRequestException('Tiền tố mã kích hoạt phải có chữ hoặc số');
     if (isDiscount && (!data.discountType || !(data.discountValue > 0) || !data.scope)) throw new BadRequestException('Chương trình giảm giá cần loại, mức giảm và phạm vi áp dụng');
     if (isDiscount && data.discountType === DiscountType.PERCENT && data.discountValue > 100) throw new BadRequestException('Mức giảm phần trăm không được vượt quá 100');
     if (data.scope === PromotionScope.CATEGORY) {
@@ -73,7 +74,8 @@ export class PromotionsService {
     await this.validate(dto);
     const code = dto.code.trim().toUpperCase();
     if (await this.model.exists({ code, isDeleted: false })) throw new BadRequestException('Mã chương trình đã tồn tại');
-    return { data: await this.model.create({ ...dto, code, voucherPrefix: dto.voucherPrefix?.trim().toUpperCase(), giftGroups: dto.giftGroups?.map((group) => ({ ...group, code: group.code.trim().toUpperCase() })), activated: 0, used: 0 }) };
+    const activationPrefix = (dto.activationPrefix || code).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 7);
+    return { data: await this.model.create({ ...dto, code, activationPrefix, voucherPrefix: dto.voucherPrefix?.trim().toUpperCase(), giftGroups: dto.giftGroups?.map((group) => ({ ...group, code: group.code.trim().toUpperCase() })), activated: 0, used: 0 }) };
   }
 
   async update(id: string, dto: UpdatePromotionDto) {
@@ -84,6 +86,7 @@ export class PromotionsService {
     const update: any = { ...dto };
     if (dto.code) update.code = dto.code.trim().toUpperCase();
     if (dto.voucherPrefix) update.voucherPrefix = dto.voucherPrefix.trim().toUpperCase();
+    if (dto.activationPrefix !== undefined) update.activationPrefix = (dto.activationPrefix || update.code || current.code).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 7);
     if (dto.giftGroups) update.giftGroups = dto.giftGroups.map((group) => ({ ...group, code: group.code.trim().toUpperCase() }));
     return { data: await this.model.findByIdAndUpdate(id, update, { new: true }) };
   }
@@ -112,6 +115,33 @@ export class PromotionsService {
       data: data.map((promotion: any) => ({ ...promotion, id: String(promotion._id) })),
       meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) },
     };
+  }
+
+  async options(query: PromotionOptionsQueryDto): Promise<any> {
+    await this.expireEnded();
+    const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100);
+    const parseEnums = <T extends string>(value: string | undefined, allowed: T[], fallback: T[]): T[] => {
+      if (!value?.trim()) return fallback;
+      const values = [...new Set(value.split(',').map((item) => item.trim().toUpperCase()).filter(Boolean))] as T[];
+      if (!values.length || values.some((item) => !allowed.includes(item))) throw new BadRequestException('Bộ lọc chương trình không hợp lệ');
+      return values;
+    };
+    const types = parseEnums(query.types, Object.values(PromotionType), [PromotionType.BUY_X_GET_Y, PromotionType.BUNDLE_GIFT]);
+    const statuses = parseEnums(query.statuses, Object.values(PromotionStatus), [PromotionStatus.ACTIVE, PromotionStatus.SCHEDULED, PromotionStatus.DRAFT]);
+    const filter: any = { isDeleted: false, type: { $in: types }, status: { $in: statuses } };
+    if (query.search?.trim()) {
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = ['code', 'name', 'activationPrefix'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
+    }
+    const pipeline: any[] = [
+      { $match: filter },
+      { $addFields: { statusPriority: { $indexOfArray: [[PromotionStatus.ACTIVE, PromotionStatus.SCHEDULED, PromotionStatus.DRAFT, PromotionStatus.PAUSED, PromotionStatus.ENDED], '$status'] } } },
+      { $sort: { statusPriority: 1, startAt: -1, code: 1 } },
+      { $facet: { data: [{ $skip: (page - 1) * limit }, { $limit: limit }, { $project: { code: 1, name: 1, type: 1, status: 1, activationPrefix: 1, startAt: 1, endAt: 1 } }], meta: [{ $count: 'total' }] } },
+    ];
+    const [result] = await this.model.aggregate(pipeline);
+    const total = result?.meta?.[0]?.total || 0;
+    return { data: (result?.data || []).map((item: any) => ({ ...item, id: String(item._id) })), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
   async summary() {

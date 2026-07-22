@@ -1,7 +1,7 @@
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsMongoId, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
-import { PaymentMethod } from '../schemas/invoices.schema';
+import { InvoicePaymentStatus, PaymentMethod } from '../schemas/invoices.schema';
 
 export class InvoiceItemDto {
   @ApiProperty() @IsMongoId() productId: string;
@@ -51,4 +51,13 @@ export class CreateInvoiceDto extends InvoicePreviewDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() allowDebtLimitOverride?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() debtOverrideReason?: string;
   @ApiPropertyOptional({ type: [PromotionApplicationDto] }) @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PromotionApplicationDto) promotionApplications?: PromotionApplicationDto[];
+}
+export class InvoiceQueryDto {
+  @ApiPropertyOptional() @IsOptional() @IsMongoId() salespersonId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() from?: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() to?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
+  @ApiPropertyOptional({ enum: InvoicePaymentStatus }) @IsOptional() @IsEnum(InvoicePaymentStatus) paymentStatus?: InvoicePaymentStatus;
+  @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
+  @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
 }

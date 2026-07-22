@@ -1,10 +1,10 @@
-import { Body, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Get, Param, Post, Query, Req } from '@nestjs/common';
 import { ApiOperation } from '@nestjs/swagger';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { InvoicesService } from 'src/collection/invoices/invoices.service';
-import { ApplyGiftPromotionDto, CreateInvoiceDto, GiftPromotionPreviewDto, InvoicePreviewDto } from 'src/collection/invoices/dtos/invoices.dto';
+import { ApplyGiftPromotionDto, CreateInvoiceDto, GiftPromotionPreviewDto, InvoicePreviewDto, InvoiceQueryDto } from 'src/collection/invoices/dtos/invoices.dto';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
 
 @WarehouseController(['invoices'])
@@ -41,9 +41,13 @@ export class InvoicesController {
 
   @ApiOperation({ summary: 'Get all invoices' })
   @Get()
-  async findAll(): Promise<any> {
-    return await this.service.findAll();
+  async findAll(@Query() query: InvoiceQueryDto): Promise<any> {
+    return await this.service.findAll(query);
   }
+
+  @ApiOperation({ summary: 'Get filtered invoice revenue summary' })
+  @Get('summary')
+  summary(@Query() query: InvoiceQueryDto): Promise<any> { return this.service.summary(query); }
 
   @ApiOperation({ summary: 'Get invoice by ID' })
   @Get(':id')

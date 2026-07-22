@@ -20,6 +20,8 @@ import { DashboardModule } from './collection/dashboard/dashboard.module';
 import { InventoryModule } from './collection/inventory/inventory.module';
 import { CustomersModule } from './collection/customers/customers.module';
 import { PromotionsModule } from './collection/promotions/promotions.module';
+import { PromotionActivationsModule } from './collection/promotion-activations/promotion-activations.module';
+import { EmployeeKpisModule } from './collection/employee-kpis/employee-kpis.module';
 
 @Module({
   imports: [
@@ -37,6 +39,8 @@ import { PromotionsModule } from './collection/promotions/promotions.module';
     InventoryModule,
     CustomersModule,
     PromotionsModule,
+    PromotionActivationsModule,
+    EmployeeKpisModule,
     PublicModule,
     AdminModule,
     RouterModule.register([
