@@ -4,7 +4,7 @@ import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { TrucksService } from '../../../collection/trucks/trucks.service';
-import { AvailableDriversQueryDto, AvailableProductsQueryDto, ChangeTruckStatusDto, CreateTruckDto, LoadGoodsDto, ReturnGoodsDto, TruckListQueryDto, UpdateTruckDto } from '../../../collection/trucks/dtos/trucks.dto';
+import { AvailableDriversQueryDto, AvailableProductsQueryDto, ChangeTruckStatusDto, CreateTruckDto, LoadGoodsDto, ReturnGoodsDto, TruckListQueryDto, TruckToTruckTransferDto, UpdateTruckDto } from '../../../collection/trucks/dtos/trucks.dto';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
 
 @WarehouseController(['trucks'])
@@ -55,6 +55,12 @@ export class TrucksController {
   returnGoods(@Param('id', ParseIdPipe) id: ID, @Body() dto: ReturnGoodsDto, @Req() request: AuthRequest) {
     return this.service.returnGoods(id, dto, this.currentUserId(request));
   }
+
+  @Post(':id/transfer/preview') @ApiOperation({ summary: 'Preview a truck-to-truck stock transfer' })
+  previewTransfer(@Param('id', ParseIdPipe) id: ID, @Body() dto: TruckToTruckTransferDto) { return this.service.previewTruckTransfer(String(id), dto); }
+
+  @Post(':id/transfer') @ApiOperation({ summary: 'Transfer stock between trucks transactionally' })
+  transfer(@Param('id', ParseIdPipe) id: ID, @Body() dto: TruckToTruckTransferDto, @Req() request: AuthRequest) { return this.service.transferBetweenTrucks(String(id), dto, this.currentUserId(request)); }
 
   private currentUserId(request: AuthRequest) {
     const user: any = request.user;

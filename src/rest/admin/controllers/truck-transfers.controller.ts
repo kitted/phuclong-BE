@@ -1,11 +1,12 @@
-import { Get, Param, Query, Res, StreamableFile } from '@nestjs/common';
+import { Body, Get, Param, Post, Query, Req, Res, StreamableFile } from '@nestjs/common';
 import { ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { WarehouseController } from '../decorators/warehouse';
 import { TrucksService } from '../../../collection/trucks/trucks.service';
-import { TruckTransferQueryDto } from '../../../collection/trucks/dtos/trucks.dto';
+import { ReverseTruckTransferDto, TruckTransferQueryDto } from '../../../collection/trucks/dtos/trucks.dto';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { Response } from 'express';
+import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
 
 @WarehouseController(['truck-transfers'])
 export class TruckTransfersController {
@@ -30,4 +31,7 @@ export class TruckTransfersController {
 
   @Get(':id') @ApiOperation({ summary: 'Get truck transfer detail' })
   findOne(@Param('id', ParseIdPipe) id: ID) { return this.service.findTransfer(String(id)); }
+
+  @Post(':id/reverse') @ApiOperation({ summary: 'Create a reverse truck-to-truck transfer' })
+  reverse(@Param('id', ParseIdPipe) id: ID, @Body() dto: ReverseTruckTransferDto, @Req() request: AuthRequest) { const user: any = request.user; return this.service.reverseTruckTransfer(String(id), dto, String(user?.id || user?._id || '')); }
 }
