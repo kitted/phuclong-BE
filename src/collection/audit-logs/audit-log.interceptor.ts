@@ -1,0 +1,25 @@
+import { CallHandler, ExecutionContext, HttpException, Injectable, NestInterceptor, StreamableFile } from '@nestjs/common';
+import { randomUUID } from 'crypto'; import { Request, Response } from 'express'; import { Observable, catchError, from, mergeMap, throwError } from 'rxjs'; import { AuditLogsService } from './audit-logs.service'; import { AuditLogAction, AuditLogStatus } from './schemas/audit-logs.schema';
+@Injectable()
+export class AuditLogInterceptor implements NestInterceptor {
+  constructor(private readonly audit: AuditLogsService) {}
+  private action(method: string, path: string) { if (/login/i.test(path)) return AuditLogAction.LOGIN; if (/export/i.test(path)) return AuditLogAction.EXPORT; return ({ GET: AuditLogAction.READ, POST: AuditLogAction.CREATE, PUT: AuditLogAction.UPDATE, PATCH: AuditLogAction.UPDATE, DELETE: AuditLogAction.DELETE } as any)[method] || AuditLogAction.OTHER; }
+  private sanitize(value: any, depth = 0, seen = new WeakSet<object>()): any {
+    if (value === null || value === undefined || typeof value === 'number' || typeof value === 'boolean') return value;
+    if (typeof value === 'string') return value.length > 4000 ? `${value.slice(0, 4000)}…[truncated]` : value;
+    if (typeof value === 'bigint') return String(value); if (value instanceof Date) return value.toISOString(); if (Buffer.isBuffer(value)) return `[Buffer ${value.length} bytes]`; if (value instanceof StreamableFile) return '[StreamableFile]';
+    if (typeof value !== 'object') return String(value); if (depth >= 7) return '[Max depth reached]'; if (seen.has(value)) return '[Circular]'; seen.add(value);
+    if (Array.isArray(value)) return value.slice(0, 100).map((item) => this.sanitize(item, depth + 1, seen)).concat(value.length > 100 ? [`… ${value.length - 100} more items`] : []);
+    const output: any = {}; const sensitive = /password|passcode|token|secret|authorization|cookie|otp|pin|credential/i;
+    for (const [key, item] of Object.entries(value).slice(0, 150)) output[key] = sensitive.test(key) ? '[REDACTED]' : this.sanitize(item, depth + 1, seen);
+    return output;
+  }
+  private base(context: ExecutionContext, request: Request, response: Response, correlationId: string, started: number) {
+    const user: any = (request as any).user || {}; const path = request.originalUrl || request.url; const routePath = (request.route as any)?.path; const segments = path.split('?')[0].split('/').filter(Boolean); const resource = segments.find((segment) => !['admin', 'public'].includes(segment)); const params: any = request.params || {}; const body: any = request.body;
+    return { correlationId, occurredAt: new Date(started), action: this.action(request.method, path), actorId: String(user.id || user._id || '') || undefined, actorRole: user.role, method: request.method, path, routeTemplate: routePath ? `${request.baseUrl || ''}${routePath}` : undefined, controller: context.getClass().name, handler: context.getHandler().name, resource, entityId: params.id || params.customerId || params.code, entityCode: params.code || body?.code, description: `${request.method} ${path}`, ipAddress: request.ip || request.socket?.remoteAddress, userAgent: request.get('user-agent'), origin: request.get('origin'), referer: request.get('referer'), requestQuery: this.sanitize(request.query), requestParams: this.sanitize(params), requestBody: this.sanitize(body), changedFields: ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) && body && typeof body === 'object' ? Object.keys(body).filter((key) => !/password|token|secret/i.test(key)) : [], httpStatus: response.statusCode, durationMs: Date.now() - started, serverHost: request.get('host') };
+  }
+  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+    if (context.getType() !== 'http') return next.handle(); const request = context.switchToHttp().getRequest<Request>(); const response = context.switchToHttp().getResponse<Response>(); const correlationId = String(request.get('x-correlation-id') || randomUUID()); response.setHeader('X-Correlation-Id', correlationId); const started = Date.now();
+    return next.handle().pipe(mergeMap((data) => from(this.audit.record({ ...this.base(context, request, response, correlationId, started), status: AuditLogStatus.SUCCESS, responseBody: this.sanitize(data), entityId: (request.params as any)?.id || data?.data?.id || data?.data?._id || undefined, entityCode: (request.params as any)?.code || data?.data?.code || data?.data?.transfer?.code || (request.body as any)?.code })).pipe(mergeMap(() => [data]))), catchError((error) => { const httpStatus = error instanceof HttpException ? error.getStatus() : 500; const details = error instanceof HttpException ? error.getResponse() : undefined; return from(this.audit.record({ ...this.base(context, request, response, correlationId, started), status: AuditLogStatus.FAILED, httpStatus, errorName: error?.name, errorMessage: error?.message || 'Unknown error', errorDetails: this.sanitize(details) })).pipe(mergeMap(() => throwError(() => error))); }));
+  }
+}

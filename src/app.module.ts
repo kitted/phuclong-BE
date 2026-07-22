@@ -23,6 +23,7 @@ import { PromotionsModule } from './collection/promotions/promotions.module';
 import { PromotionActivationsModule } from './collection/promotion-activations/promotion-activations.module';
 import { EmployeeKpisModule } from './collection/employee-kpis/employee-kpis.module';
 import { DebtPaymentsModule } from './collection/debt-payments/debt-payments.module';
+import { AuditLogsModule } from './collection/audit-logs/audit-logs.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { DebtPaymentsModule } from './collection/debt-payments/debt-payments.mod
     PromotionActivationsModule,
     EmployeeKpisModule,
     DebtPaymentsModule,
+    AuditLogsModule,
     PublicModule,
     AdminModule,
     RouterModule.register([

@@ -29,6 +29,7 @@ import { TruckTransfersController } from './controllers/truck-transfers.controll
 import { PromotionActivationsController } from './controllers/promotion-activations.controller';
 import { EmployeeKpisController } from './controllers/employee-kpis.controller';
 import { DebtPaymentsController } from './controllers/debt-payments.controller';
+import { AuditLogsController } from './controllers/audit-logs.controller';
 
 @Module({
   imports: [
@@ -63,6 +64,7 @@ import { DebtPaymentsController } from './controllers/debt-payments.controller';
     PromotionActivationsController,
     EmployeeKpisController,
     DebtPaymentsController,
+    AuditLogsController,
   ],
 })
 export class AdminModule {}
