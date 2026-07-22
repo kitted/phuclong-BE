@@ -23,6 +23,7 @@ export class TruckTransfers extends BaseModel {
   @prop({ ref: () => Trucks, required: true }) truckId: Ref<Trucks>;
   @prop({ required: true }) truckCode: string;
   @prop({ required: true }) truckName: string;
+  @prop() truckLicensePlate?: string;
   @prop({ ref: () => Users }) driverId?: Ref<Users>;
   @prop() driverCode?: string;
   @prop() driverName?: string;

@@ -12,6 +12,8 @@ import { InventoryLocationType, InventoryMovementType } from '../inventory/schem
 import { Users, UserStatus } from '../users/schemas/users.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
 import { AvailableDriversQueryDto } from './dtos/trucks.dto';
+import * as ExcelJS from 'exceljs';
+import { vietnamDateBoundary } from './truck-transfer-date';
 
 @Injectable()
 export class TrucksService {
@@ -187,14 +189,14 @@ export class TrucksService {
   }
 
   async availableProducts(query: AvailableProductsQueryDto) {
-    const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100);
+    const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 1000);
     const filter: any = { isDeleted: false, stock: { $gt: 0 } };
     if (query.search?.trim()) {
       const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       filter.$or = [{ code: { $regex: escaped, $options: 'i' } }, { name: { $regex: escaped, $options: 'i' } }];
     }
     const [products, totalItems] = await Promise.all([this.productModel.find(filter).sort({ code: 1 }).skip((page - 1) * limit).limit(limit).lean(), this.productModel.countDocuments(filter)]);
-    return { data: products.map((product: any) => ({ productId: String(product._id), code: product.code, name: product.name, unit: product.unit || '', warehouseQuantity: product.stock || 0, costPrice: product.costPrice || 0 })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+    return { data: products.map((product: any) => ({ id: String(product._id), productId: String(product._id), code: product.code, name: product.name, unit: product.unit || '', stock: product.stock || 0, warehouseQuantity: product.stock || 0, costPrice: product.costPrice || 0 })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }
 
   async availableDrivers(query: AvailableDriversQueryDto) {
@@ -225,7 +227,7 @@ export class TrucksService {
   }
 
   private transferCode(type: TruckTransferType, requested?: string) {
-    return requested?.trim().toUpperCase() || `${type === TruckTransferType.LOAD ? 'CX' : 'HX'}-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Date.now().toString().slice(-6)}`;
+    return requested?.trim().toUpperCase() || `${type === TruckTransferType.LOAD ? 'PX' : 'PH'}-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Date.now().toString().slice(-6)}`;
   }
 
   async loadGoods(id: ID | string, dto: LoadGoodsDto, createdBy?: string) {
@@ -285,7 +287,7 @@ export class TrucksService {
         if (type === TruckTransferType.RETURN) await this.model.updateOne({ _id: truckId }, { $pull: { inventory: { qty: { $lte: 0 } } } }, { session });
         const totalQuantity = snapshots.reduce((sum, item) => sum + item.qty, 0); const totalValue = snapshots.reduce((sum, item) => sum + item.qty * item.unitCost, 0);
         const transfer: any = (await this.transferModel.create([{
-          code, type, truckId, truckCode: truck.code, truckName: truck.name,
+          code, type, truckId, truckCode: truck.code, truckName: truck.name, truckLicensePlate: truck.licensePlate,
           driverId: truck.driverId || undefined,
           driverCode: driver?.employeeCode,
           driverName: truck.driverName || driver?.fullName || truck.driver,
@@ -302,14 +304,31 @@ export class TrucksService {
 
   private mapTransfer(transfer: any) {
     const creator = transfer.createdBy;
-    return { id: String(transfer._id), code: transfer.code, type: transfer.type, date: transfer.date, truck: { id: String(transfer.truckId), code: transfer.truckCode, name: transfer.truckName }, driver: transfer.driverId || transfer.driverName ? { id: transfer.driverId ? String(transfer.driverId) : null, employeeCode: transfer.driverCode, fullName: transfer.driverName, phone: transfer.driverPhone } : null, totalQuantity: transfer.totalQuantity, totalValue: transfer.totalValue, note: transfer.note, items: (transfer.items || []).map((item) => ({ productId: String(item.productId), productCode: item.productCode, productName: item.productName, unit: item.unit || '', qty: item.qty, unitCost: item.unitCost, stockValue: item.qty * item.unitCost })), createdBy: creator ? { id: String(creator._id || creator), fullName: creator.fullName || creator.username } : null, createdAt: transfer.createdAt };
+    return { id: String(transfer._id), code: transfer.code, type: transfer.type, date: transfer.date, truck: { id: String(transfer.truckId), code: transfer.truckCode, name: transfer.truckName, licensePlate: transfer.truckLicensePlate }, driver: transfer.driverId || transfer.driverName ? { id: transfer.driverId ? String(transfer.driverId) : null, employeeCode: transfer.driverCode, fullName: transfer.driverName, phone: transfer.driverPhone } : null, totalQuantity: transfer.totalQuantity, totalValue: transfer.totalValue, note: transfer.note, items: (transfer.items || []).map((item) => ({ productId: String(item.productId), productCode: item.productCode, productName: item.productName, unit: item.unit || '', qty: item.qty, unitCost: item.unitCost, stockValue: item.qty * item.unitCost })), createdBy: creator ? { id: String(creator._id || creator), fullName: creator.fullName || creator.username } : null, createdAt: transfer.createdAt };
+  }
+
+  private transferFilter(query: TruckTransferQueryDto) {
+    const filter: any = { isDeleted: false };
+    if (query.truckId) {
+      if (!Types.ObjectId.isValid(query.truckId)) throw new BadRequestException('truckId không hợp lệ');
+      filter.truckId = query.truckId;
+    }
+    if (query.type) filter.type = query.type;
+    if (query.search?.trim()) {
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [{ code: { $regex: escaped, $options: 'i' } }, { truckCode: { $regex: escaped, $options: 'i' } }, { truckName: { $regex: escaped, $options: 'i' } }];
+    }
+    if (query.from || query.to) {
+      filter.date = {};
+      if (query.from) filter.date.$gte = vietnamDateBoundary(query.from, false);
+      if (query.to) filter.date.$lte = vietnamDateBoundary(query.to, true);
+      if (filter.date.$gte && filter.date.$lte && filter.date.$gte > filter.date.$lte) throw new BadRequestException('Ngày bắt đầu phải trước ngày kết thúc');
+    }
+    return filter;
   }
 
   async findTransfers(query: TruckTransferQueryDto): Promise<any> {
-    const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100); const filter: any = { isDeleted: false };
-    if (query.truckId) filter.truckId = query.truckId; if (query.type) filter.type = query.type;
-    if (query.search?.trim()) { const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); filter.$or = [{ code: { $regex: escaped, $options: 'i' } }, { truckCode: { $regex: escaped, $options: 'i' } }, { truckName: { $regex: escaped, $options: 'i' } }]; }
-    if (query.from || query.to) { filter.date = {}; if (query.from) filter.date.$gte = new Date(query.from); if (query.to) { const to = new Date(query.to); to.setHours(23, 59, 59, 999); filter.date.$lte = to; } }
+    const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100); const filter = this.transferFilter(query);
     const [transfers, totalItems] = await Promise.all([this.transferModel.find(filter).sort({ date: -1 }).skip((page - 1) * limit).limit(limit).populate('createdBy', 'fullName username').lean(), this.transferModel.countDocuments(filter)]);
     return { data: transfers.map((transfer) => this.mapTransfer(transfer)), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }
@@ -318,5 +337,42 @@ export class TrucksService {
     const transfer = await this.transferModel.findOne({ _id: id, isDeleted: false }).populate('createdBy', 'fullName username').lean();
     if (!transfer) throw new NotFoundException('Không tìm thấy phiếu điều chuyển');
     return { data: this.mapTransfer(transfer) };
+  }
+
+  async transferSummary(query: TruckTransferQueryDto) {
+    const transfers: any[] = await this.transferModel.find(this.transferFilter(query)).select('truckId items totalQuantity totalValue').lean();
+    const truckIds = new Set<string>(); const productIds = new Set<string>();
+    let totalQuantity = 0; let totalValue = 0;
+    for (const transfer of transfers) {
+      truckIds.add(String(transfer.truckId)); totalQuantity += transfer.totalQuantity || 0; totalValue += transfer.totalValue || 0;
+      for (const item of transfer.items || []) productIds.add(String(item.productId));
+    }
+    return { data: { totalTransfers: transfers.length, totalQuantity, totalValue, truckCount: truckIds.size, productCount: productIds.size } };
+  }
+
+  async exportTransfers(query: TruckTransferQueryDto): Promise<Buffer> {
+    const transfers: any[] = await this.transferModel.find(this.transferFilter(query)).sort({ date: -1 }).populate('createdBy', 'fullName username').lean();
+    const workbook = new ExcelJS.Workbook(); const sheet = workbook.addWorksheet('Phieu dieu chuyen');
+    sheet.columns = [
+      { header: 'Mã phiếu', key: 'code', width: 20 }, { header: 'Loại phiếu', key: 'type', width: 14 },
+      { header: 'Ngày', key: 'date', width: 22 }, { header: 'Mã xe', key: 'truckCode', width: 14 },
+      { header: 'Tên xe', key: 'truckName', width: 24 }, { header: 'Biển số', key: 'licensePlate', width: 18 },
+      { header: 'Mã tài xế', key: 'driverCode', width: 16 }, { header: 'Tên tài xế', key: 'driverName', width: 26 },
+      { header: 'Mã sản phẩm', key: 'productCode', width: 18 }, { header: 'Tên sản phẩm', key: 'productName', width: 30 },
+      { header: 'Đơn vị', key: 'unit', width: 12 }, { header: 'Số lượng', key: 'qty', width: 14 },
+      { header: 'Giá vốn', key: 'unitCost', width: 16 }, { header: 'Thành tiền', key: 'stockValue', width: 18 },
+      { header: 'Người tạo', key: 'createdBy', width: 24 }, { header: 'Ghi chú', key: 'note', width: 32 },
+    ];
+    for (const transfer of transfers) {
+      for (const item of transfer.items || []) sheet.addRow({
+        code: transfer.code, type: transfer.type, date: transfer.date, truckCode: transfer.truckCode, truckName: transfer.truckName,
+        licensePlate: transfer.truckLicensePlate || '', driverCode: transfer.driverCode || '', driverName: transfer.driverName || '',
+        productCode: item.productCode, productName: item.productName, unit: item.unit || '', qty: item.qty, unitCost: item.unitCost,
+        stockValue: item.qty * item.unitCost, createdBy: transfer.createdBy?.fullName || transfer.createdBy?.username || '', note: transfer.note || '',
+      });
+    }
+    sheet.getRow(1).font = { bold: true }; sheet.views = [{ state: 'frozen', ySplit: 1 }]; sheet.autoFilter = { from: 'A1', to: 'P1' };
+    sheet.getColumn('date').numFmt = 'dd/mm/yyyy hh:mm'; ['qty', 'unitCost', 'stockValue'].forEach((column) => { sheet.getColumn(column).numFmt = '#,##0'; });
+    return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 }
