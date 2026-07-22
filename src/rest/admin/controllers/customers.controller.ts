@@ -1,4 +1,4 @@
-import { Body, Get, Param, Patch, Post, Query, Res, StreamableFile } from '@nestjs/common';
+import { Body, Get, Param, Patch, Post, Query, Req, Res, StreamableFile } from '@nestjs/common';
 import { ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { CustomersService } from '../../../collection/customers/customers.service';
 import { CreateCustomerDto, CreateInteractionDto, CustomerQueryDto, ImportCustomersDto, UpdateCustomerDto } from '../../../collection/customers/dtos/customers.dto';
@@ -8,10 +8,13 @@ import { ID } from '../../../core/interfaces/id.interface';
 import { Response } from 'express';
 import { PromotionActivationsService } from '../../../collection/promotion-activations/promotion-activations.service';
 import { PromotionActivationQueryDto } from '../../../collection/promotion-activations/dtos/promotion-activations.dto';
+import { DebtPaymentsService } from '../../../collection/debt-payments/debt-payments.service';
+import { CreateDebtPaymentDto, DebtPaymentQueryDto } from '../../../collection/debt-payments/dtos/debt-payments.dto';
+import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
 
 @WarehouseController(['customers'])
 export class CustomersController {
-  constructor(private readonly service: CustomersService, private readonly activations: PromotionActivationsService) {}
+  constructor(private readonly service: CustomersService, private readonly activations: PromotionActivationsService, private readonly debtPayments: DebtPaymentsService) {}
 
   @Get() @ApiOperation({ summary: 'Search and filter customers' })
   findAll(@Query() query: CustomerQueryDto): Promise<any> { return this.service.findAll(query); }
@@ -32,6 +35,12 @@ export class CustomersController {
 
   @Get(':id/promotion-activations') @ApiOperation({ summary: 'Get promotion activations of customer' })
   activationsOfCustomer(@Param('id', ParseIdPipe) id: ID, @Query() query: PromotionActivationQueryDto): Promise<any> { return this.activations.findAll({ ...query, customerId: String(id) }); }
+
+  @Post(':id/debt-payments') @ApiOperation({ summary: 'Collect and allocate customer debt payment' })
+  createDebtPayment(@Param('id', ParseIdPipe) id: ID, @Body() dto: CreateDebtPaymentDto, @Req() request: AuthRequest): Promise<any> { const user: any = request.user; return this.debtPayments.create(String(id), dto, String(user?.id || user?._id || '')); }
+
+  @Get(':id/debt-payments') @ApiOperation({ summary: 'Get customer debt payment history' })
+  customerDebtPayments(@Param('id', ParseIdPipe) id: ID, @Query() query: DebtPaymentQueryDto): Promise<any> { return this.debtPayments.findAll({ ...query, customerId: String(id) }); }
 
   @Post('import') @ApiOperation({ summary: 'Bulk upsert customers parsed from Excel by phone' })
   import(@Body() dto: ImportCustomersDto) { return this.service.importRows(dto.rows); }

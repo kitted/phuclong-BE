@@ -17,6 +17,12 @@ export class InvoicePayment {
   @prop() bankName?: string;
   @prop() note?: string;
 }
+export class InvoiceDebtPayment {
+  @prop({ required: true }) receiptId: string;
+  @prop({ required: true }) receiptCode: string;
+  @prop({ required: true, min: 0 }) amount: number;
+  @prop({ required: true }) paidAt: Date;
+}
 
 export class InvoiceItem {
   @prop({ ref: () => Products, required: true }) productId: Ref<Products>;
@@ -90,6 +96,7 @@ export class Invoices extends BaseModel {
   @prop({ type: () => [InvoicePayment], default: [] }) payments: InvoicePayment[];
   @prop({ default: 0, min: 0 }) paidAmount: number;
   @prop({ default: 0, min: 0 }) debtAmount: number;
+  @prop({ type: () => [InvoiceDebtPayment], default: [] }) debtPayments: InvoiceDebtPayment[];
   @prop({ default: false }) debtLimitOverridden: boolean;
   @prop() debtOverrideReason?: string;
   @prop({ enum: InvoicePaymentStatus, default: InvoicePaymentStatus.UNPAID }) paymentStatus: InvoicePaymentStatus;

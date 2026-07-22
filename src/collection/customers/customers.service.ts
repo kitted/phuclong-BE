@@ -54,13 +54,13 @@ export class CustomersService {
     if (query.source) filter.source = query.source;
     if (query.segment) filter.segment = query.segment;
     if (query.zaloConnected === 'true' || query.zaloConnected === 'false') filter.zaloConnected = query.zaloConnected === 'true';
-    if (query.debtWarning === true || String(query.debtWarning) === 'true') filter.$expr = { $and: [{ $gt: ['$debtLimit', 0] }, { $gte: ['$debt', '$debtLimit'] }] };
+    if (query.debtWarning === true || String(query.debtWarning) === 'true') filter.$expr = { $and: [{ $gt: [{ $ifNull: ['$debt', 0] }, 0] }, { $gte: [{ $ifNull: ['$debt', 0] }, { $ifNull: ['$debtLimit', 0] }] }] };
     const [data, totalItems] = await Promise.all([
       this.model.find(filter).select('code name phone email address source segment zaloConnected debt debtLimit note createdAt updatedAt').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       this.model.countDocuments(filter),
     ]);
     return {
-      data: data.map((customer: any) => ({ ...customer, id: String(customer._id), availableDebtLimit: customer.debtLimit > 0 ? Math.max(0, customer.debtLimit - (customer.debt || 0)) : null, debtWarning: customer.debtLimit > 0 && customer.debt >= customer.debtLimit })),
+      data: data.map((customer: any) => ({ ...customer, id: String(customer._id), availableDebtLimit: customer.debtLimit > 0 ? Math.max(0, customer.debtLimit - (customer.debt || 0)) : 0, debtWarning: (customer.debt || 0) > 0 && (customer.debt || 0) >= (customer.debtLimit || 0) })),
       meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) },
     };
   }
@@ -71,7 +71,7 @@ export class CustomersService {
       totalCustomers: rows.length,
       zaloConnected: rows.filter((x) => x.zaloConnected).length,
       leads: rows.filter((x) => x.source === 'LEAD').length,
-      debtWarnings: rows.filter((x) => x.debtLimit > 0 && x.debt >= x.debtLimit).length,
+      debtWarnings: rows.filter((x) => (x.debt || 0) > 0 && (x.debt || 0) >= (x.debtLimit || 0)).length,
       totalDebt: rows.reduce((sum, x) => sum + (x.debt || 0), 0),
     } };
   }

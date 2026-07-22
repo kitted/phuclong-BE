@@ -12,6 +12,7 @@ import { CustomersModule } from 'src/collection/customers/customers.module';
 import { PromotionsModule } from 'src/collection/promotions/promotions.module';
 import { PromotionActivationsModule } from 'src/collection/promotion-activations/promotion-activations.module';
 import { EmployeeKpisModule } from 'src/collection/employee-kpis/employee-kpis.module';
+import { DebtPaymentsModule } from 'src/collection/debt-payments/debt-payments.module';
 
 import { UsersController } from './controllers/users';
 import { CategoriesController } from './controllers/categories.controller';
@@ -27,6 +28,7 @@ import { PromotionsController } from './controllers/promotions.controller';
 import { TruckTransfersController } from './controllers/truck-transfers.controller';
 import { PromotionActivationsController } from './controllers/promotion-activations.controller';
 import { EmployeeKpisController } from './controllers/employee-kpis.controller';
+import { DebtPaymentsController } from './controllers/debt-payments.controller';
 
 @Module({
   imports: [
@@ -43,6 +45,7 @@ import { EmployeeKpisController } from './controllers/employee-kpis.controller';
     PromotionsModule,
     PromotionActivationsModule,
     EmployeeKpisModule,
+    DebtPaymentsModule,
   ],
   controllers: [
     UsersController,
@@ -59,6 +62,7 @@ import { EmployeeKpisController } from './controllers/employee-kpis.controller';
     TruckTransfersController,
     PromotionActivationsController,
     EmployeeKpisController,
+    DebtPaymentsController,
   ],
 })
 export class AdminModule {}
