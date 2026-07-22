@@ -17,7 +17,7 @@ export class CategoriesService {
   }
 
   async findAll() {
-    return await this.model.find({ isDeleted: false });
+    return await this.model.find({ isDeleted: false }).sort({ createdAt: -1, _id: -1 });
   }
 
   async findOne(id: ID | string) {

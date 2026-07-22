@@ -32,7 +32,7 @@ export class ProductsService {
       filter.$or = ['code', 'name', 'barcode'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
     }
     const [products, totalItems] = await Promise.all([
-      this.model.find(filter).sort({ code: 1 }).skip((page - 1) * limit).limit(limit).populate('categoryId', 'name').populate('supplierId', 'name').lean(),
+      this.model.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).populate('categoryId', 'name').populate('supplierId', 'name').lean(),
       this.model.countDocuments(filter),
     ]);
     return { data: products.map((product: any) => ({ ...product, id: String(product._id), category: product.categoryId ? { id: String(product.categoryId._id), name: product.categoryId.name } : null })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };

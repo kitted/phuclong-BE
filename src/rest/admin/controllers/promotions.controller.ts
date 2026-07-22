@@ -5,6 +5,7 @@ import { AssignVoucherDto, ChangePromotionStatusDto, CreatePromotionDto, Promoti
 import { WarehouseController } from '../decorators/warehouse';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
+import { AdminOnly } from '../decorators/admin-only';
 
 @WarehouseController(['promotions'])
 export class PromotionsController {
@@ -28,18 +29,18 @@ export class PromotionsController {
   @Get(':id/invoices') @ApiOperation({ summary: 'Get invoices using promotion' })
   invoices(@Param('id', ParseIdPipe) id: ID, @Query('page') page?: string, @Query('limit') limit?: string): Promise<any> { return this.service.promotionInvoices(String(id), page, limit); }
 
-  @Post() @ApiOperation({ summary: 'Create promotion' })
+  @Post() @AdminOnly() @ApiOperation({ summary: 'Create promotion' })
   create(@Body() dto: CreatePromotionDto) { return this.service.create(dto); }
 
-  @Patch(':id') @ApiOperation({ summary: 'Update promotion' })
+  @Patch(':id') @AdminOnly() @ApiOperation({ summary: 'Update promotion' })
   update(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdatePromotionDto) { return this.service.update(String(id), dto); }
 
-  @Patch(':id/status') @ApiOperation({ summary: 'Activate, schedule or pause promotion' })
+  @Patch(':id/status') @AdminOnly() @ApiOperation({ summary: 'Activate, schedule or pause promotion' })
   status(@Param('id', ParseIdPipe) id: ID, @Body() dto: ChangePromotionStatusDto) { return this.service.changeStatus(String(id), dto.status); }
 
-  @Post(':id/vouchers') @ApiOperation({ summary: 'Assign a voucher to customer' })
+  @Post(':id/vouchers') @AdminOnly() @ApiOperation({ summary: 'Assign a voucher to customer' })
   assign(@Param('id', ParseIdPipe) id: ID, @Body() dto: AssignVoucherDto) { return this.service.assignVoucher(String(id), dto); }
 
-  @Post('vouchers/:code/use') @ApiOperation({ summary: 'Redeem voucher atomically' })
+  @Post('vouchers/:code/use') @AdminOnly() @ApiOperation({ summary: 'Redeem voucher atomically' })
   use(@Param('code') code: string, @Body() dto: UseVoucherDto) { return this.service.useVoucher(code, dto); }
 }

@@ -45,7 +45,7 @@ export class PromotionActivationsService {
     if (query.search) filter.$or = ['code', 'promotionCode', 'promotionName', 'invoiceCode', 'customerCode', 'customerName', 'customerPhone', 'salespersonCode', 'salespersonName'].map((key) => ({ [key]: { $regex: query.search, $options: 'i' } }));
     if (query.from || query.to) { filter.activatedAt = {}; if (query.from) filter.activatedAt.$gte = new Date(query.from); if (query.to) { const to = new Date(query.to); to.setHours(23, 59, 59, 999); filter.activatedAt.$lte = to; } }
     const page = Number(query.page) || 1; const limit = Number(query.limit) || 20;
-    const [data, total] = await Promise.all([this.model.find(filter).sort({ activatedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(), this.model.countDocuments(filter)]);
+    const [data, total] = await Promise.all([this.model.find(filter).sort({ activatedAt: -1, createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(), this.model.countDocuments(filter)]);
     return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
   async findOne(value: string, byCode = false): Promise<any> {

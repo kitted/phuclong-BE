@@ -11,6 +11,7 @@ import { PromotionActivationQueryDto } from '../../../collection/promotion-activ
 import { DebtPaymentsService } from '../../../collection/debt-payments/debt-payments.service';
 import { CreateDebtPaymentDto, DebtPaymentQueryDto } from '../../../collection/debt-payments/dtos/debt-payments.dto';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
+import { AdminOnly } from '../decorators/admin-only';
 
 @WarehouseController(['customers'])
 export class CustomersController {
@@ -36,24 +37,24 @@ export class CustomersController {
   @Get(':id/promotion-activations') @ApiOperation({ summary: 'Get promotion activations of customer' })
   activationsOfCustomer(@Param('id', ParseIdPipe) id: ID, @Query() query: PromotionActivationQueryDto): Promise<any> { return this.activations.findAll({ ...query, customerId: String(id) }); }
 
-  @Post(':id/debt-payments') @ApiOperation({ summary: 'Collect and allocate customer debt payment' })
+  @Post(':id/debt-payments') @AdminOnly() @ApiOperation({ summary: 'Collect and allocate customer debt payment' })
   createDebtPayment(@Param('id', ParseIdPipe) id: ID, @Body() dto: CreateDebtPaymentDto, @Req() request: AuthRequest): Promise<any> { const user: any = request.user; return this.debtPayments.create(String(id), dto, String(user?.id || user?._id || '')); }
 
   @Get(':id/debt-payments') @ApiOperation({ summary: 'Get customer debt payment history' })
   customerDebtPayments(@Param('id', ParseIdPipe) id: ID, @Query() query: DebtPaymentQueryDto): Promise<any> { return this.debtPayments.findAll({ ...query, customerId: String(id) }); }
 
-  @Post('import') @ApiOperation({ summary: 'Bulk upsert customers parsed from Excel by phone' })
+  @Post('import') @AdminOnly() @ApiOperation({ summary: 'Bulk upsert customers parsed from Excel by phone' })
   import(@Body() dto: ImportCustomersDto) { return this.service.importRows(dto.rows); }
 
   @Get(':id') @ApiOperation({ summary: 'Get customer 360 profile' })
   findOne(@Param('id', ParseIdPipe) id: ID) { return this.service.findOne(String(id)); }
 
-  @Post() @ApiOperation({ summary: 'Create customer' })
+  @Post() @AdminOnly() @ApiOperation({ summary: 'Create customer' })
   create(@Body() dto: CreateCustomerDto) { return this.service.create(dto); }
 
-  @Patch(':id') @ApiOperation({ summary: 'Update customer' })
+  @Patch(':id') @AdminOnly() @ApiOperation({ summary: 'Update customer' })
   update(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateCustomerDto) { return this.service.update(String(id), dto); }
 
-  @Post(':id/interactions') @ApiOperation({ summary: 'Record customer interaction' })
+  @Post(':id/interactions') @AdminOnly() @ApiOperation({ summary: 'Record customer interaction' })
   interaction(@Param('id', ParseIdPipe) id: ID, @Body() dto: CreateInteractionDto) { return this.service.addInteraction(String(id), dto); }
 }

@@ -6,6 +6,7 @@ import { WarehouseController } from '../decorators/warehouse';
 import { ProductsService } from 'src/collection/products/products.service';
 import { CreateProductDto, ImportProductsDto, ProductListQueryDto, UpdateProductDto } from 'src/collection/products/dtos/products.dto';
 import { Response } from 'express';
+import { AdminOnly } from '../decorators/admin-only';
 
 @WarehouseController(['products'])
 export class ProductsController {
@@ -13,6 +14,7 @@ export class ProductsController {
 
   @ApiOperation({ summary: 'Create product' })
   @Post()
+  @AdminOnly()
   async create(@Body() dto: CreateProductDto) {
     return await this.service.create(dto);
   }
@@ -37,6 +39,7 @@ export class ProductsController {
 
   @ApiOperation({ summary: 'Bulk upsert products parsed from Excel by code' })
   @Post('import')
+  @AdminOnly()
   import(@Body() dto: ImportProductsDto) {
     return this.service.importRows(dto.rows);
   }
@@ -49,12 +52,14 @@ export class ProductsController {
 
   @ApiOperation({ summary: 'Update product' })
   @Put(':id')
+  @AdminOnly()
   async update(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateProductDto) {
     return await this.service.update(id, dto);
   }
 
   @ApiOperation({ summary: 'Delete product' })
   @Delete(':id')
+  @AdminOnly()
   async remove(@Param('id', ParseIdPipe) id: ID) {
     return await this.service.remove(id);
   }

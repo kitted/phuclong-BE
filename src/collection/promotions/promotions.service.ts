@@ -108,7 +108,7 @@ export class PromotionsService {
     if (query.status) filter.status = query.status;
     if (query.type) filter.type = query.type;
     const [data, totalItems] = await Promise.all([
-      this.model.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      this.model.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       this.model.countDocuments(filter),
     ]);
     return {
@@ -218,7 +218,7 @@ export class PromotionsService {
 
   async promotionInvoices(id: string, pageValue?: string, limitValue?: string): Promise<any> {
     const page = this.positiveInt(pageValue, 1); const limit = this.positiveInt(limitValue, 20, 100); const filter = { isDeleted: false, $or: [{ promotionId: id }, { 'promotionApplications.promotionId': id }] };
-    const [data, totalItems] = await Promise.all([this.invoiceModel.find(filter).sort({ date: -1 }).skip((page - 1) * limit).limit(limit).select('code date customer customerId subtotal discountAmount grandTotal totalAmount').lean(), this.invoiceModel.countDocuments(filter)]);
+    const [data, totalItems] = await Promise.all([this.invoiceModel.find(filter).sort({ date: -1, createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).select('code date customer customerId subtotal discountAmount grandTotal totalAmount').lean(), this.invoiceModel.countDocuments(filter)]);
     return { data, meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }
 }

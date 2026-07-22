@@ -54,9 +54,13 @@ export class CustomersService {
     if (query.source) filter.source = query.source;
     if (query.segment) filter.segment = query.segment;
     if (query.zaloConnected === 'true' || query.zaloConnected === 'false') filter.zaloConnected = query.zaloConnected === 'true';
-    if (query.debtWarning === true || String(query.debtWarning) === 'true') filter.$expr = { $and: [{ $gt: [{ $ifNull: ['$debt', 0] }, 0] }, { $gte: [{ $ifNull: ['$debt', 0] }, { $ifNull: ['$debtLimit', 0] }] }] };
+    const expressions: any[] = [];
+    if (query.hasDebt === true || String(query.hasDebt) === 'true') expressions.push({ $gt: [{ $ifNull: ['$debt', 0] }, 0] });
+    if (query.debtWarning === true || String(query.debtWarning) === 'true') expressions.push({ $and: [{ $gt: [{ $ifNull: ['$debt', 0] }, 0] }, { $gte: [{ $ifNull: ['$debt', 0] }, { $ifNull: ['$debtLimit', 0] }] }] });
+    if (expressions.length === 1) filter.$expr = expressions[0];
+    else if (expressions.length > 1) filter.$expr = { $and: expressions };
     const [data, totalItems] = await Promise.all([
-      this.model.find(filter).select('code name phone email address source segment zaloConnected debt debtLimit note createdAt updatedAt').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      this.model.find(filter).select('code name phone email address source segment zaloConnected debt debtLimit note createdAt updatedAt').sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       this.model.countDocuments(filter),
     ]);
     return {
@@ -80,8 +84,8 @@ export class CustomersService {
     const customer: any = await this.model.findOne({ _id: id, isDeleted: false }).lean();
     if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
     const [invoices, vouchers] = await Promise.all([
-      this.invoiceModel.find({ customerId: id, isDeleted: false }).sort({ date: -1 }).lean(),
-      this.voucherModel.find({ customerId: id, isDeleted: false }).populate('promotionId', 'name discountType discountValue').sort({ createdAt: -1 }).lean(),
+      this.invoiceModel.find({ customerId: id, isDeleted: false }).sort({ date: -1, createdAt: -1, _id: -1 }).lean(),
+      this.voucherModel.find({ customerId: id, isDeleted: false }).populate('promotionId', 'name discountType discountValue').sort({ createdAt: -1, _id: -1 }).lean(),
     ]);
     const totalSpent = invoices.reduce((sum, item) => sum + (item.totalAmount || 0), 0);
     return { data: {

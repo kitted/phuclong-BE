@@ -58,6 +58,7 @@ export class ImportsService {
 
   async findAll() {
     return await this.model.find({ isDeleted: false })
+      .sort({ date: -1, createdAt: -1, _id: -1 })
       .populate('supplierId')
       .populate('items.productId');
   }

@@ -5,6 +5,7 @@ import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { ImportsService } from 'src/collection/imports/imports.service';
 import { CreateImportDto } from 'src/collection/imports/dtos/imports.dto';
+import { AdminOnly } from '../decorators/admin-only';
 
 @WarehouseController(['imports'])
 export class ImportsController {
@@ -12,6 +13,7 @@ export class ImportsController {
 
   @ApiOperation({ summary: 'Create import' })
   @Post()
+  @AdminOnly()
   async create(@Body() dto: CreateImportDto) {
     return await this.service.create(dto);
   }

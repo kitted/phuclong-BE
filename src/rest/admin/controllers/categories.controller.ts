@@ -5,6 +5,7 @@ import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { CategoriesService } from 'src/collection/categories/categories.service';
 import { CreateCategoryDto, UpdateCategoryDto } from 'src/collection/categories/dtos/categories.dto';
+import { AdminOnly } from '../decorators/admin-only';
 
 @WarehouseController(['categories'])
 export class CategoriesController {
@@ -12,6 +13,7 @@ export class CategoriesController {
 
   @ApiOperation({ summary: 'Create category' })
   @Post()
+  @AdminOnly()
   async create(@Body() dto: CreateCategoryDto) {
     return await this.service.create(dto);
   }
@@ -30,12 +32,14 @@ export class CategoriesController {
 
   @ApiOperation({ summary: 'Update category' })
   @Put(':id')
+  @AdminOnly()
   async update(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateCategoryDto) {
     return await this.service.update(id, dto);
   }
 
   @ApiOperation({ summary: 'Delete category' })
   @Delete(':id')
+  @AdminOnly()
   async remove(@Param('id', ParseIdPipe) id: ID) {
     return await this.service.remove(id);
   }

@@ -22,6 +22,7 @@ export class CustomerQueryDto {
   @ApiPropertyOptional({ enum: CustomerSegment }) @IsOptional() @IsEnum(CustomerSegment) segment?: CustomerSegment;
   @ApiPropertyOptional() @IsOptional() zaloConnected?: string;
   @ApiPropertyOptional({ type: Boolean }) @Transform(({ value }) => value === true || value === 'true' ? true : value === false || value === 'false' ? false : undefined) @IsOptional() @IsBoolean() debtWarning?: boolean;
+  @ApiPropertyOptional({ type: Boolean }) @Transform(({ value }) => value === true || value === 'true' ? true : value === false || value === 'false' ? false : undefined) @IsOptional() @IsBoolean() hasDebt?: boolean;
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
 }

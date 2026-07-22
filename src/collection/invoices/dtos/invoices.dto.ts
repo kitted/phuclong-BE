@@ -45,7 +45,7 @@ export class CreateInvoiceDto extends InvoicePreviewDto {
   @ApiPropertyOptional() @IsOptional() @IsString() customer?: string;
   @ApiProperty({ enum: ['warehouse', 'truck'] }) @IsEnum(['warehouse', 'truck']) sourceType: 'warehouse' | 'truck';
   @ApiPropertyOptional() @IsOptional() @IsMongoId() truckId?: string;
-  @ApiProperty() @IsMongoId() salespersonId: string;
+  @ApiPropertyOptional({ description: 'Required for admin; inferred from JWT for staff' }) @IsOptional() @IsMongoId() salespersonId?: string;
   @ApiProperty({ type: [InvoicePaymentDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => InvoicePaymentDto) payments: InvoicePaymentDto[];
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() allowDebtLimitOverride?: boolean;

@@ -10,15 +10,12 @@ import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.int
 @WarehouseController(['invoices'])
 export class InvoicesController {
   constructor(private readonly service: InvoicesService) {}
+  private actor(request: AuthRequest): any { const user: any = request.user; const doc = user?._doc || user; return { id: String(doc?.id || doc?._id || ''), role: doc?.role }; }
 
   @ApiOperation({ summary: 'Create invoice' })
   @Post()
   async create(@Body() dto: CreateInvoiceDto, @Req() request: AuthRequest) {
-    const user: any = request.user;
-    return await this.service.create(dto, {
-      id: String(user?.id || user?._id || user?._doc?._id || ''),
-      role: user?.role || user?._doc?.role,
-    });
+    return await this.service.create(dto, this.actor(request));
   }
 
   @ApiOperation({ summary: 'Preview server-calculated invoice totals and voucher' })
@@ -41,17 +38,17 @@ export class InvoicesController {
 
   @ApiOperation({ summary: 'Get all invoices' })
   @Get()
-  async findAll(@Query() query: InvoiceQueryDto): Promise<any> {
-    return await this.service.findAll(query);
+  async findAll(@Query() query: InvoiceQueryDto, @Req() request: AuthRequest): Promise<any> {
+    return await this.service.findAll(query, this.actor(request));
   }
 
   @ApiOperation({ summary: 'Get filtered invoice revenue summary' })
   @Get('summary')
-  summary(@Query() query: InvoiceQueryDto): Promise<any> { return this.service.summary(query); }
+  summary(@Query() query: InvoiceQueryDto, @Req() request: AuthRequest): Promise<any> { return this.service.summary(query, this.actor(request)); }
 
   @ApiOperation({ summary: 'Get invoice by ID' })
   @Get(':id')
-  async findOne(@Param('id', ParseIdPipe) id: ID): Promise<any> {
-    return await this.service.findOne(id);
+  async findOne(@Param('id', ParseIdPipe) id: ID, @Req() request: AuthRequest): Promise<any> {
+    return await this.service.findOne(id, this.actor(request));
   }
 }

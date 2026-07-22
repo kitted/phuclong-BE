@@ -6,12 +6,13 @@ import { WarehouseController } from '../decorators/warehouse';
 import { TrucksService } from '../../../collection/trucks/trucks.service';
 import { AvailableDriversQueryDto, AvailableProductsQueryDto, ChangeTruckStatusDto, CreateTruckDto, LoadGoodsDto, ReturnGoodsDto, TruckListQueryDto, TruckToTruckTransferDto, UpdateTruckDto } from '../../../collection/trucks/dtos/trucks.dto';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
+import { AdminOnly } from '../decorators/admin-only';
 
 @WarehouseController(['trucks'])
 export class TrucksController {
   constructor(private readonly service: TrucksService) {}
 
-  @Post() @ApiOperation({ summary: 'Create truck' })
+  @Post() @AdminOnly() @ApiOperation({ summary: 'Create truck' })
   create(@Body() dto: CreateTruckDto) { return this.service.create(dto); }
 
   @Get() @ApiOperation({ summary: 'Search and paginate trucks' })
@@ -34,32 +35,32 @@ export class TrucksController {
   @Get(':id') @ApiOperation({ summary: 'Get truck and full inventory' })
   findOne(@Param('id', ParseIdPipe) id: ID) { return this.service.findOne(id); }
 
-  @Patch(':id') @ApiOperation({ summary: 'Partially update truck' })
+  @Patch(':id') @AdminOnly() @ApiOperation({ summary: 'Partially update truck' })
   update(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateTruckDto) { return this.service.update(id, dto); }
 
-  @Put(':id') @ApiOperation({ summary: 'Update truck (backward-compatible)' })
+  @Put(':id') @AdminOnly() @ApiOperation({ summary: 'Update truck (backward-compatible)' })
   updateLegacy(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateTruckDto) { return this.service.update(id, dto); }
 
-  @Patch(':id/status') @ApiOperation({ summary: 'Change truck operating status' })
+  @Patch(':id/status') @AdminOnly() @ApiOperation({ summary: 'Change truck operating status' })
   status(@Param('id', ParseIdPipe) id: ID, @Body() dto: ChangeTruckStatusDto) { return this.service.changeStatus(String(id), dto); }
 
-  @Delete(':id') @ApiOperation({ summary: 'Delete an empty truck' })
+  @Delete(':id') @AdminOnly() @ApiOperation({ summary: 'Delete an empty truck' })
   remove(@Param('id', ParseIdPipe) id: ID) { return this.service.remove(id); }
 
-  @Post(':id/load') @ApiOperation({ summary: 'Load warehouse goods to truck transactionally' })
+  @Post(':id/load') @AdminOnly() @ApiOperation({ summary: 'Load warehouse goods to truck transactionally' })
   loadGoods(@Param('id', ParseIdPipe) id: ID, @Body() dto: LoadGoodsDto, @Req() request: AuthRequest) {
     return this.service.loadGoods(id, dto, this.currentUserId(request));
   }
 
-  @Post(':id/return') @ApiOperation({ summary: 'Return truck goods to warehouse transactionally' })
+  @Post(':id/return') @AdminOnly() @ApiOperation({ summary: 'Return truck goods to warehouse transactionally' })
   returnGoods(@Param('id', ParseIdPipe) id: ID, @Body() dto: ReturnGoodsDto, @Req() request: AuthRequest) {
     return this.service.returnGoods(id, dto, this.currentUserId(request));
   }
 
-  @Post(':id/transfer/preview') @ApiOperation({ summary: 'Preview a truck-to-truck stock transfer' })
+  @Post(':id/transfer/preview') @AdminOnly() @ApiOperation({ summary: 'Preview a truck-to-truck stock transfer' })
   previewTransfer(@Param('id', ParseIdPipe) id: ID, @Body() dto: TruckToTruckTransferDto) { return this.service.previewTruckTransfer(String(id), dto); }
 
-  @Post(':id/transfer') @ApiOperation({ summary: 'Transfer stock between trucks transactionally' })
+  @Post(':id/transfer') @AdminOnly() @ApiOperation({ summary: 'Transfer stock between trucks transactionally' })
   transfer(@Param('id', ParseIdPipe) id: ID, @Body() dto: TruckToTruckTransferDto, @Req() request: AuthRequest) { return this.service.transferBetweenTrucks(String(id), dto, this.currentUserId(request)); }
 
   private currentUserId(request: AuthRequest) {

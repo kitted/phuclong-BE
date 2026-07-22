@@ -159,7 +159,7 @@ export class UsersService {
       filter.$or = ['employeeCode', 'username', 'fullName', 'phone', 'email'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
     }
     const [users, totalItems] = await Promise.all([
-      this.userModel.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      this.userModel.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       this.userModel.countDocuments(filter),
     ]);
     return {

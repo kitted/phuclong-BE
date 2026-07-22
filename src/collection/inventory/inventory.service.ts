@@ -189,7 +189,7 @@ export class InventoryService {
       }
     }
     const [movements, totalItems] = await Promise.all([
-      this.movementModel.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit)
+      this.movementModel.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit)
         .populate('sourceTruckId', 'code name').populate('destinationTruckId', 'code name').lean(),
       this.movementModel.countDocuments(filter),
     ]);

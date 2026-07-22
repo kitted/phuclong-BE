@@ -24,6 +24,17 @@ import { CustomerDebtLedger, DebtLedgerDirection, DebtLedgerType } from '../debt
 
 type Actor = { id?: string; role?: RoleEnum };
 
+export function resolveInvoiceSalespersonId(requestedId: string | undefined, actor: Actor): string {
+  if (actor.role === RoleEnum.STAFF) {
+    if (!actor.id || !Types.ObjectId.isValid(actor.id)) throw new ForbiddenException('Không xác định được tài khoản nhân viên hiện tại');
+    if (requestedId && String(requestedId) !== String(actor.id)) throw new ForbiddenException('Nhân viên chỉ được tạo hóa đơn dưới chính tài khoản của mình');
+    return String(actor.id);
+  }
+  if (!requestedId) throw new BadRequestException('Vui lòng chọn nhân viên bán hàng');
+  if (!Types.ObjectId.isValid(requestedId)) throw new BadRequestException('salespersonId không hợp lệ');
+  return String(requestedId);
+}
+
 @Injectable()
 export class InvoicesService {
   constructor(
@@ -135,8 +146,8 @@ export class InvoicesService {
   }
 
   async create(dto: CreateInvoiceDto, actor: Actor = {}): Promise<any> {
+    const salespersonId = resolveInvoiceSalespersonId(dto.salespersonId, actor);
     if (dto.sourceType === 'truck' && !dto.truckId) throw new BadRequestException('Phải chọn xe tải khi xuất từ xe');
-    if (!Types.ObjectId.isValid(dto.salespersonId)) throw new BadRequestException('salespersonId không hợp lệ');
     const date = dto.date ? new Date(dto.date) : new Date();
     if (Number.isNaN(date.getTime())) throw new BadRequestException('Ngày hóa đơn không hợp lệ');
     const payments = this.normalizedPayments(dto);
@@ -144,7 +155,7 @@ export class InvoicesService {
     const session = await this.connection.startSession(); let response: any;
     try {
       await session.withTransaction(async () => {
-        const salesperson: any = await this.userModel.findOne({ _id: dto.salespersonId, role: RoleEnum.STAFF, status: UserStatus.ACTIVE, isDeleted: false }).session(session);
+        const salesperson: any = await this.userModel.findOne({ _id: salespersonId, role: RoleEnum.STAFF, status: UserStatus.ACTIVE, isDeleted: false }).session(session);
         if (!salesperson) throw new BadRequestException('Nhân viên bán hàng không hoạt động hoặc không tồn tại');
         const customer: any = dto.customerId ? await this.customerModel.findOne({ _id: dto.customerId, isDeleted: false }).session(session) : null;
         if (dto.customerId && !customer) throw new BadRequestException('Khách hàng không tồn tại');
@@ -219,9 +230,10 @@ export class InvoicesService {
     } finally { await session.endSession(); }
   }
 
-  private async invoiceFilter(query: InvoiceQueryDto): Promise<any> {
+  private async invoiceFilter(query: InvoiceQueryDto, actor: Actor = {}): Promise<any> {
     const filter: any = { isDeleted: false };
-    if (query.salespersonId) filter.salespersonId = query.salespersonId;
+    if (actor.role === RoleEnum.STAFF && actor.id) filter.salespersonId = actor.id;
+    else if (query.salespersonId) filter.salespersonId = query.salespersonId;
     if (query.paymentStatus) filter.paymentStatus = query.paymentStatus;
     if (query.from || query.to) { filter.date = {}; if (query.from) filter.date.$gte = vietnamDateBoundary(query.from, false); if (query.to) filter.date.$lte = vietnamDateBoundary(query.to, true); }
     if (query.search?.trim()) {
@@ -236,28 +248,28 @@ export class InvoicesService {
     return filter;
   }
 
-  async findAll(query: InvoiceQueryDto = {}): Promise<any> {
+  async findAll(query: InvoiceQueryDto = {}, actor: Actor = {}): Promise<any> {
     const page = Math.max(1, Number(query.page) || 1); const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
-    const filter = await this.invoiceFilter(query);
-    const [rows, total] = await Promise.all([this.model.find(filter).select('-__v').sort({ date: -1 }).skip((page - 1) * limit).limit(limit).populate('customerId', 'code name phone').populate('salespersonId', 'employeeCode fullName').lean(), this.model.countDocuments(filter)]);
+    const filter = await this.invoiceFilter(query, actor);
+    const [rows, total] = await Promise.all([this.model.find(filter).select('-__v').sort({ date: -1, createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).populate('customerId', 'code name phone').populate('salespersonId', 'employeeCode fullName').lean(), this.model.countDocuments(filter)]);
     const invoiceIds = rows.map((row: any) => row._id); const activations: any[] = invoiceIds.length ? await this.activationModel.find({ invoiceId: { $in: invoiceIds }, isDeleted: false }).select('invoiceId code status activatedAt').lean() : [];
     const byInvoice = new Map<string, any[]>(); for (const activation of activations) { const key = String(activation.invoiceId); byInvoice.set(key, [...(byInvoice.get(key) || []), activation]); }
     return { data: rows.map((row: any) => ({ ...row, id: String(row._id), activationCodes: byInvoice.get(String(row._id)) || [] })), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
-  async summary(query: InvoiceQueryDto): Promise<any> {
-    const filter = await this.invoiceFilter({ ...query, search: undefined, page: undefined, limit: undefined });
+  async summary(query: InvoiceQueryDto, actor: Actor = {}): Promise<any> {
+    const filter = await this.invoiceFilter({ ...query, search: undefined, page: undefined, limit: undefined }, actor);
     const [values, customers, activationCount] = await Promise.all([
       this.model.aggregate([{ $match: filter }, { $group: { _id: null, invoiceCount: { $sum: 1 }, grossRevenue: { $sum: '$subtotal' }, discountAmount: { $sum: '$discountAmount' }, netRevenue: { $sum: '$grandTotal' }, paidAmount: { $sum: '$paidAmount' }, debtAmount: { $sum: '$debtAmount' } } }]),
       this.model.distinct('customerId', { ...filter, customerId: { $ne: null } }),
-      this.activationModel.countDocuments({ isDeleted: false, status: PromotionActivationStatus.ACTIVE, ...(query.salespersonId ? { salespersonId: query.salespersonId } : {}), ...((query.from || query.to) ? { activatedAt: { ...(query.from ? { $gte: vietnamDateBoundary(query.from, false) } : {}), ...(query.to ? { $lte: vietnamDateBoundary(query.to, true) } : {}) } } : {}) }),
+      this.activationModel.countDocuments({ isDeleted: false, status: PromotionActivationStatus.ACTIVE, ...((actor.role === RoleEnum.STAFF && actor.id) ? { salespersonId: actor.id } : query.salespersonId ? { salespersonId: query.salespersonId } : {}), ...((query.from || query.to) ? { activatedAt: { ...(query.from ? { $gte: vietnamDateBoundary(query.from, false) } : {}), ...(query.to ? { $lte: vietnamDateBoundary(query.to, true) } : {}) } } : {}) }),
     ]);
     const row = values[0] || {};
     return { data: { invoiceCount: row.invoiceCount || 0, grossRevenue: row.grossRevenue || 0, discountAmount: row.discountAmount || 0, netRevenue: row.netRevenue || 0, paidAmount: row.paidAmount || 0, debtAmount: row.debtAmount || 0, uniqueCustomers: customers.length, promotionActivationCount: activationCount } };
   }
 
-  async findOne(id: ID | string): Promise<any> {
-    const doc = await this.model.findOne({ _id: id, isDeleted: false }).populate('customerId', 'code name phone').populate('truckId', 'code name licensePlate').populate('salespersonId', 'employeeCode fullName').lean();
+  async findOne(id: ID | string, actor: Actor = {}): Promise<any> {
+    const doc = await this.model.findOne({ _id: id, isDeleted: false, ...((actor.role === RoleEnum.STAFF && actor.id) ? { salespersonId: actor.id } : {}) }).populate('customerId', 'code name phone').populate('truckId', 'code name licensePlate').populate('salespersonId', 'employeeCode fullName').lean();
     if (!doc) throw new NotFoundException('Không tìm thấy hóa đơn');
     return { data: doc };
   }

@@ -7,6 +7,7 @@ import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { Response } from 'express';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
+import { AdminOnly } from '../decorators/admin-only';
 
 @WarehouseController(['truck-transfers'])
 export class TruckTransfersController {
@@ -32,6 +33,6 @@ export class TruckTransfersController {
   @Get(':id') @ApiOperation({ summary: 'Get truck transfer detail' })
   findOne(@Param('id', ParseIdPipe) id: ID) { return this.service.findTransfer(String(id)); }
 
-  @Post(':id/reverse') @ApiOperation({ summary: 'Create a reverse truck-to-truck transfer' })
+  @Post(':id/reverse') @AdminOnly() @ApiOperation({ summary: 'Create a reverse truck-to-truck transfer' })
   reverse(@Param('id', ParseIdPipe) id: ID, @Body() dto: ReverseTruckTransferDto, @Req() request: AuthRequest) { const user: any = request.user; return this.service.reverseTruckTransfer(String(id), dto, String(user?.id || user?._id || '')); }
 }

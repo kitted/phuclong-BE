@@ -122,7 +122,7 @@ export class TrucksService {
     if (query.hasInventory === 'false') filter.$expr = { $lte: [{ $sum: '$inventory.qty' }, 0] };
     const sortBy = query.sortBy || 'createdAt'; const direction = query.sortOrder === 'asc' ? 1 : -1;
     const [trucks, totalItems] = await Promise.all([
-      this.model.find(filter).sort({ [sortBy]: direction }).skip((page - 1) * limit).limit(limit).lean(),
+      this.model.find(filter).sort({ [sortBy]: direction, _id: direction }).skip((page - 1) * limit).limit(limit).lean(),
       this.model.countDocuments(filter),
     ]);
     const [products, drivers] = await Promise.all([this.productMapFor(trucks), this.driverMapFor(trucks)]);
@@ -387,7 +387,7 @@ export class TrucksService {
 
   async findTransfers(query: TruckTransferQueryDto): Promise<any> {
     const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100); const filter = this.transferFilter(query);
-    const [transfers, totalItems] = await Promise.all([this.transferModel.find(filter).sort({ date: -1 }).skip((page - 1) * limit).limit(limit).populate('createdBy', 'fullName username').lean(), this.transferModel.countDocuments(filter)]);
+    const [transfers, totalItems] = await Promise.all([this.transferModel.find(filter).sort({ date: -1, createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).populate('createdBy', 'fullName username').lean(), this.transferModel.countDocuments(filter)]);
     return { data: transfers.map((transfer) => this.mapTransfer(transfer)), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }
 
@@ -410,7 +410,7 @@ export class TrucksService {
   }
 
   async exportTransfers(query: TruckTransferQueryDto): Promise<Buffer> {
-    const transfers: any[] = await this.transferModel.find(this.transferFilter(query)).sort({ date: -1 }).populate('createdBy', 'fullName username').lean();
+    const transfers: any[] = await this.transferModel.find(this.transferFilter(query)).sort({ date: -1, createdAt: -1, _id: -1 }).populate('createdBy', 'fullName username').lean();
     const workbook = new ExcelJS.Workbook(); const sheet = workbook.addWorksheet('Phieu dieu chuyen');
     sheet.columns = [
       { header: 'Mã phiếu', key: 'code', width: 20 }, { header: 'Loại phiếu', key: 'type', width: 14 },
