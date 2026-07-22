@@ -7,7 +7,7 @@ export const RolesGuard = (roles: RoleEnum[]): Type<CanActivate> => {
     async canActivate(context: ExecutionContext) {
       await super.canActivate(context);
       const { user } = context.switchToHttp().getRequest();
-      return roles.includes(user._doc.role);
+      return roles.includes(user?.role || user?._doc?.role);
     }
   }
 

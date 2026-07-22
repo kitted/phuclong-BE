@@ -50,6 +50,8 @@ export class CreateInvoiceDto extends InvoicePreviewDto {
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() allowDebtLimitOverride?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() debtOverrideReason?: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() paymentDueDate?: string;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) paymentTermDays?: number;
   @ApiPropertyOptional({ type: [PromotionApplicationDto] }) @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PromotionApplicationDto) promotionApplications?: PromotionApplicationDto[];
 }
 export class InvoiceQueryDto {

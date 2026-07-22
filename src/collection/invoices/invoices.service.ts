@@ -20,6 +20,7 @@ import { PromotionActivationsService } from '../promotion-activations/promotion-
 import { PromotionActivations, PromotionActivationStatus } from '../promotion-activations/schemas/promotion-activations.schema';
 import { InvoiceQueryDto } from './dtos/invoices.dto';
 import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
+import { CustomerDebtLedger, DebtLedgerDirection, DebtLedgerType } from '../debt-payments/schemas/customer-debt-ledger.schema';
 
 type Actor = { id?: string; role?: RoleEnum };
 
@@ -36,6 +37,7 @@ export class InvoicesService {
     @InjectModel(InvoiceCounters) private readonly counterModel: ReturnModelType<typeof InvoiceCounters>,
     @InjectModel(Categories) private readonly categoryModel: ReturnModelType<typeof Categories>,
     @InjectModel(PromotionActivations) private readonly activationModel: ReturnModelType<typeof PromotionActivations>,
+    @InjectModel(CustomerDebtLedger) private readonly debtLedgerModel: ReturnModelType<typeof CustomerDebtLedger>,
     private readonly movements: InventoryMovementsService,
     private readonly ruleEngine: PromotionRuleEngineService,
     private readonly activations: PromotionActivationsService,
@@ -62,7 +64,7 @@ export class InvoicesService {
     const productMap = new Map(products.map((product) => [String(product._id), product]));
     const items = requested.map((item) => {
       const product: any = productMap.get(item.productId); const price = Number(product.sellPrice) || 0;
-      return { productId: item.productId, productCode: product.code, productName: product.name, productType: product.productType || (product.categoryId ? categoryMap.get(String(product.categoryId)) : ''), brandId: product.brandId, unit: product.unit || '', categoryId: product.categoryId ? String(product.categoryId) : null, categoryName: product.categoryId ? categoryMap.get(String(product.categoryId)) || '' : '', qty: item.qty, price, lineTotal: price * item.qty, lineType: InvoiceLineType.SALE, originalPrice: price };
+      return { productId: item.productId, productCode: product.code, productName: product.name, productType: product.productType || (product.categoryId ? categoryMap.get(String(product.categoryId)) : ''), brandId: product.brandId, unit: product.unit || '', categoryId: product.categoryId ? String(product.categoryId) : null, categoryName: product.categoryId ? categoryMap.get(String(product.categoryId)) || '' : '', qty: item.qty, price, lineTotal: price * item.qty, lineType: InvoiceLineType.SALE, originalPrice: price, costPrice: Number(product.costPrice) || 0 };
     });
     const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
     let discountAmount = 0; let promotion: any = null; let voucher: any = null; let eligibleItems: any[] = [];
@@ -183,11 +185,12 @@ export class InvoicesService {
           await this.truckModel.updateOne({ _id: dto.truckId }, { $pull: { inventory: { qty: { $lte: 0 } } } }, { session });
         }
         const paymentStatus = paidAmount === 0 ? InvoicePaymentStatus.UNPAID : paidAmount < calculated.grandTotal ? InvoicePaymentStatus.PARTIAL : InvoicePaymentStatus.PAID;
+        const paymentDueDate = dto.paymentDueDate ? new Date(dto.paymentDueDate) : dto.paymentTermDays ? new Date(date.getTime() + dto.paymentTermDays * 86400000) : undefined;
         const invoice: any = (await this.model.create([{
           code, date, customer: customer?.name || dto.customer || 'Khách lẻ', customerId: customer?._id,
           sourceType: dto.sourceType, truckId: dto.truckId, note: dto.note, items: inventoryLines,
           subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, totalAmount: calculated.grandTotal,
-          payments, paidAmount, debtAmount, paymentStatus, debtLimitOverridden: Boolean(dto.allowDebtLimitOverride), debtOverrideReason: dto.debtOverrideReason?.trim(),
+          payments, paidAmount, debtAmount, initialPaidAmount: paidAmount, initialDebtAmount: debtAmount, paymentStatus, paymentDueDate, paymentTermDays: dto.paymentTermDays, debtLimitOverridden: Boolean(dto.allowDebtLimitOverride), debtOverrideReason: dto.debtOverrideReason?.trim(),
           promotionId: calculated.promotion?._id, promotionCode: calculated.promotion?.code, promotionName: calculated.promotion?.name,
           voucherId: calculated.voucher?._id, voucherCode: calculated.voucher?.code, discountType: calculated.promotion?.discountType, discountValue: calculated.promotion?.discountValue,
           promotionApplications: giftApplication ? [{ promotionId: giftApplication.promotion._id, promotionCode: giftApplication.promotion.code, promotionName: giftApplication.promotion.name, applicationCount: giftApplication.applicationCount, matchedConditions: giftApplication.matchedConditions, gifts: giftApplication.gifts }] : [],
@@ -207,6 +210,7 @@ export class InvoicesService {
           if (!dto.allowDebtLimitOverride && customer.debtLimit > 0) debtFilter.$expr = { $lte: [{ $add: ['$debt', debtAmount] }, '$debtLimit'] };
           const debtUpdated = await this.customerModel.findOneAndUpdate(debtFilter, { $inc: { debt: debtAmount } }, { new: true, session });
           if (!debtUpdated) throw new ConflictException({ code: 'CUSTOMER_DEBT_LIMIT_EXCEEDED', message: 'Công nợ khách hàng vừa thay đổi và đã vượt hạn mức' });
+          await this.debtLedgerModel.create([{ customerId: customer._id, customerCode: customer.code, type: DebtLedgerType.INVOICE_DEBT, direction: DebtLedgerDirection.INCREASE, amount: debtAmount, balanceAfter: debtUpdated.debt, occurredAt: date, referenceCode: code, invoiceId: invoice._id, createdBy: actor.id }], { session });
         }
         await this.movements.recordMany(movementInputs.map((movement) => ({ ...movement, referenceType: 'INVOICE', referenceId: String(invoice._id), referenceCode: code })), session);
         response = { data: { id: String(invoice._id), code, subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, paidAmount, debtAmount, paymentStatus, promotionActivations: activation ? [{ id: String(activation._id), code: activation.code, status: activation.status }] : [] } };

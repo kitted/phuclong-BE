@@ -13,10 +13,11 @@ import { Categories } from '../categories/schemas/categories.schema';
 import { PromotionRuleEngineService } from './promotion-rule-engine.service';
 import { PromotionActivationsService } from '../promotion-activations/promotion-activations.service';
 import { PromotionActivations } from '../promotion-activations/schemas/promotion-activations.schema';
+import { CustomerDebtLedger } from '../debt-payments/schemas/customer-debt-ledger.schema';
 
 describe('InvoicesService dependency injection', () => {
   it('resolves all transaction models and the Typegoose connection', async () => {
-    const models = [Invoices, InvoiceCounters, Products, Trucks, Customers, Users, Promotions, Vouchers, Categories, PromotionActivations];
+    const models = [Invoices, InvoiceCounters, Products, Trucks, Customers, Users, Promotions, Vouchers, Categories, PromotionActivations, CustomerDebtLedger];
     const module = await Test.createTestingModule({ providers: [
       InvoicesService,
       ...models.map((model) => ({ provide: getModelToken(model.name), useValue: {} })),

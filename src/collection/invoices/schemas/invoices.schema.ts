@@ -41,6 +41,7 @@ export class InvoiceItem {
   @prop({ required: true, min: 0 }) lineTotal: number;
   @prop({ enum: InvoiceLineType, default: InvoiceLineType.SALE }) lineType: InvoiceLineType;
   @prop({ min: 0 }) originalPrice?: number;
+  @prop({ default: 0, min: 0 }) costPrice: number;
 }
 
 export class InvoicePromotionGift {
@@ -81,6 +82,11 @@ export class InvoicePromotionApplication {
 @index({ salespersonId: 1, date: -1 })
 @index({ salespersonId: 1, paymentStatus: 1, date: -1 })
 @index({ promotionId: 1, date: -1 })
+@index({ date: 1, salespersonId: 1 })
+@index({ date: 1, sourceType: 1, truckId: 1 })
+@index({ 'items.productId': 1, date: 1 })
+@index({ customerId: 1, date: 1 })
+@index({ paymentStatus: 1, date: 1 })
 export class Invoices extends BaseModel {
   @prop({ required: true, unique: true }) code: string;
   @prop({ required: true }) date: Date;
@@ -96,6 +102,10 @@ export class Invoices extends BaseModel {
   @prop({ type: () => [InvoicePayment], default: [] }) payments: InvoicePayment[];
   @prop({ default: 0, min: 0 }) paidAmount: number;
   @prop({ default: 0, min: 0 }) debtAmount: number;
+  @prop({ default: 0, min: 0 }) initialPaidAmount: number;
+  @prop({ default: 0, min: 0 }) initialDebtAmount: number;
+  @prop() paymentDueDate?: Date;
+  @prop({ min: 0 }) paymentTermDays?: number;
   @prop({ type: () => [InvoiceDebtPayment], default: [] }) debtPayments: InvoiceDebtPayment[];
   @prop({ default: false }) debtLimitOverridden: boolean;
   @prop() debtOverrideReason?: string;

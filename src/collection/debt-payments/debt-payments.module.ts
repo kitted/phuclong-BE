@@ -1,2 +1,3 @@
 import { Module } from '@nestjs/common'; import { TypegooseModule } from 'nestjs-typegoose'; import { DebtPaymentCounters, DebtPayments } from './schemas/debt-payments.schema'; import { Customers } from '../customers/schemas/customers.schema'; import { Invoices } from '../invoices/schemas/invoices.schema'; import { DebtPaymentsService } from './debt-payments.service';
-@Module({ imports: [TypegooseModule.forFeature([DebtPayments, DebtPaymentCounters, Customers, Invoices])], providers: [DebtPaymentsService], exports: [DebtPaymentsService] }) export class DebtPaymentsModule {}
+import { CustomerDebtLedger } from './schemas/customer-debt-ledger.schema';
+@Module({ imports: [TypegooseModule.forFeature([DebtPayments, DebtPaymentCounters, Customers, Invoices, CustomerDebtLedger])], providers: [DebtPaymentsService], exports: [DebtPaymentsService] }) export class DebtPaymentsModule {}

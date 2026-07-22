@@ -23,6 +23,7 @@ export class Jwt2faStrategy extends PassportStrategy(
     if (!user) {
       return;
     }
-    return { ...user };
+    const value: any = typeof (user as any).toObject === 'function' ? (user as any).toObject() : ((user as any)._doc || user);
+    return { ...value, id: String(value._id || value.id) };
   }
 }

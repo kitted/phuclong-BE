@@ -8,6 +8,7 @@ export class DebtReceiptPayment { @prop({ required: true, enum: PaymentMethod })
 export class DebtPaymentAllocation { @prop({ ref: () => Invoices, required: true }) invoiceId: Ref<Invoices>; @prop({ required: true }) invoiceCode: string; @prop({ required: true, min: 0 }) amount: number; @prop({ required: true, min: 0 }) debtBefore: number; @prop({ required: true, min: 0 }) debtAfter: number; }
 @index({ customerId: 1, date: -1 })
 @index({ status: 1, date: -1 })
+@index({ date: 1, status: 1 })
 export class DebtPayments extends BaseModel {
   @prop({ required: true, unique: true }) code: string; @prop({ required: true }) date: Date;
   @prop({ ref: () => Customers, required: true }) customerId: Ref<Customers>; @prop({ required: true }) customerCode: string; @prop({ required: true }) customerName: string; @prop({ required: true }) customerPhone: string;

@@ -13,6 +13,7 @@ import { PromotionsModule } from 'src/collection/promotions/promotions.module';
 import { PromotionActivationsModule } from 'src/collection/promotion-activations/promotion-activations.module';
 import { EmployeeKpisModule } from 'src/collection/employee-kpis/employee-kpis.module';
 import { DebtPaymentsModule } from 'src/collection/debt-payments/debt-payments.module';
+import { ReportsModule } from 'src/collection/reports/reports.module';
 
 import { UsersController } from './controllers/users';
 import { CategoriesController } from './controllers/categories.controller';
@@ -30,6 +31,7 @@ import { PromotionActivationsController } from './controllers/promotion-activati
 import { EmployeeKpisController } from './controllers/employee-kpis.controller';
 import { DebtPaymentsController } from './controllers/debt-payments.controller';
 import { AuditLogsController } from './controllers/audit-logs.controller';
+import { ReportsController } from './controllers/reports.controller';
 
 @Module({
   imports: [
@@ -47,6 +49,7 @@ import { AuditLogsController } from './controllers/audit-logs.controller';
     PromotionActivationsModule,
     EmployeeKpisModule,
     DebtPaymentsModule,
+    ReportsModule,
   ],
   controllers: [
     UsersController,
@@ -65,6 +68,7 @@ import { AuditLogsController } from './controllers/audit-logs.controller';
     EmployeeKpisController,
     DebtPaymentsController,
     AuditLogsController,
+    ReportsController,
   ],
 })
 export class AdminModule {}
