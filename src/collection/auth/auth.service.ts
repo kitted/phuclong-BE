@@ -85,6 +85,7 @@ export class AuthService {
         HttpStatus.BAD_REQUEST,
       );
     }
+    await this.usersService.markLogin(String(user._id));
     return user;
   }
 
