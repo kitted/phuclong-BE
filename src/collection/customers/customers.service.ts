@@ -56,11 +56,11 @@ export class CustomersService {
     if (query.zaloConnected === 'true' || query.zaloConnected === 'false') filter.zaloConnected = query.zaloConnected === 'true';
     if (query.debtWarning === 'true') filter.$expr = { $and: [{ $gt: ['$debtLimit', 0] }, { $gte: ['$debt', '$debtLimit'] }] };
     const [data, totalItems] = await Promise.all([
-      this.model.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      this.model.find(filter).select('code name phone email address source segment zaloConnected debt debtLimit note createdAt updatedAt').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       this.model.countDocuments(filter),
     ]);
     return {
-      data: data.map((customer: any) => ({ ...customer, id: String(customer._id) })),
+      data: data.map((customer: any) => ({ ...customer, id: String(customer._id), availableDebtLimit: customer.debtLimit > 0 ? Math.max(0, customer.debtLimit - (customer.debt || 0)) : null, debtWarning: customer.debtLimit > 0 && customer.debt >= customer.debtLimit })),
       meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) },
     };
   }

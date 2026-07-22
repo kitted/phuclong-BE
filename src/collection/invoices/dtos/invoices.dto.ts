@@ -1,68 +1,33 @@
-import { IsArray, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
-import { ID } from 'src/core/interfaces/id.interface';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsMongoId, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { PaymentMethod } from '../schemas/invoices.schema';
 
 export class InvoiceItemDto {
-  @ApiProperty()
-  @IsNotEmpty()
-  productId: string;
-
-  @ApiProperty()
-  @IsNumber()
-  qty: number;
-
-  @ApiProperty()
-  @IsNumber()
-  price: number;
+  @ApiProperty() @IsMongoId() productId: string;
+  @ApiProperty() @IsInt() @Min(1) qty: number;
 }
-
-export class CreateInvoiceDto {
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  code: string;
-
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  date: string;
-
-  @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
-  customer: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  customerId?: ID | string;
-
-  @ApiProperty({ required: false })
-  @IsNumber()
-  @IsOptional()
-  paidAmount?: number;
-
-  @ApiProperty({ enum: ['warehouse', 'truck'] })
-  @IsEnum(['warehouse', 'truck'])
-  @IsNotEmpty()
-  sourceType: string;
-
-  @ApiProperty({ required: false })
-  @IsOptional()
-  truckId?: ID | string;
-
-  @ApiProperty({ required: false })
-  @IsString()
-  @IsOptional()
-  note?: string;
-
-  @ApiProperty()
-  @IsNumber()
-  totalAmount: number;
-
-  @ApiProperty({ type: [InvoiceItemDto] })
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => InvoiceItemDto)
-  items: InvoiceItemDto[];
+export class InvoicePaymentDto {
+  @ApiProperty({ enum: PaymentMethod }) @IsEnum(PaymentMethod) method: PaymentMethod;
+  @ApiProperty() @Min(0) amount: number;
+  @ApiPropertyOptional() @IsOptional() @IsString() referenceCode?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() bankName?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
+}
+export class InvoicePreviewDto {
+  @ApiPropertyOptional() @IsOptional() @IsMongoId() customerId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() voucherCode?: string;
+  @ApiProperty({ type: [InvoiceItemDto] }) @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => InvoiceItemDto) items: InvoiceItemDto[];
+}
+export class CreateInvoiceDto extends InvoicePreviewDto {
+  @ApiPropertyOptional() @IsOptional() @IsString() code?: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() date?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() customer?: string;
+  @ApiProperty({ enum: ['warehouse', 'truck'] }) @IsEnum(['warehouse', 'truck']) sourceType: 'warehouse' | 'truck';
+  @ApiPropertyOptional() @IsOptional() @IsMongoId() truckId?: string;
+  @ApiProperty() @IsMongoId() salespersonId: string;
+  @ApiProperty({ type: [InvoicePaymentDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => InvoicePaymentDto) payments: InvoicePaymentDto[];
+  @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() allowDebtLimitOverride?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsString() debtOverrideReason?: string;
 }

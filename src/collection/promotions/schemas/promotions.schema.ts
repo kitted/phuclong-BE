@@ -42,5 +42,6 @@ export class Vouchers extends BaseModel {
   @prop() activatedAt?: Date;
   @prop() usedAt?: Date;
   @prop() orderReference?: string;
+  @prop() invoiceId?: string;
   @prop({ required: true }) expiresAt: Date;
 }

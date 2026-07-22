@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectModel } from 'nestjs-typegoose';
 import { Products } from './schemas/products.schema';
 import { ReturnModelType } from '@typegoose/typegoose';
-import { CreateProductDto, UpdateProductDto } from './dtos/products.dto';
+import { CreateProductDto, ProductListQueryDto, UpdateProductDto } from './dtos/products.dto';
 import { ID } from 'src/core/interfaces/id.interface';
 import { Categories } from '../categories/schemas/categories.schema';
 import * as ExcelJS from 'exceljs';
@@ -23,10 +23,19 @@ export class ProductsService {
     return await this.model.create(dto);
   }
 
-  async findAll() {
-    return await this.model.find({ isDeleted: false })
-      .populate('categoryId', 'name')
-      .populate('supplierId', 'name');
+  async findAll(query: ProductListQueryDto = {}): Promise<any> {
+    const page = Number(query.page || 1); const limit = Number(query.limit || 20);
+    if (!Number.isInteger(page) || page < 1 || !Number.isInteger(limit) || limit < 1 || limit > 100) throw new BadRequestException('Tham số phân trang không hợp lệ');
+    const filter: any = { isDeleted: false };
+    if (query.search?.trim()) {
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = ['code', 'name', 'barcode'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
+    }
+    const [products, totalItems] = await Promise.all([
+      this.model.find(filter).sort({ code: 1 }).skip((page - 1) * limit).limit(limit).populate('categoryId', 'name').populate('supplierId', 'name').lean(),
+      this.model.countDocuments(filter),
+    ]);
+    return { data: products.map((product: any) => ({ ...product, id: String(product._id), category: product.categoryId ? { id: String(product.categoryId._id), name: product.categoryId.name } : null })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }
 
   async findOne(id: ID | string) {

@@ -26,6 +26,11 @@ export class TrucksController {
   @Get('available-drivers') @ApiOperation({ summary: 'Get active staff available for truck assignment' })
   availableDrivers(@Query() query: AvailableDriversQueryDto) { return this.service.availableDrivers(query); }
 
+  @Get(':id/available-products') @ApiOperation({ summary: 'Get sellable products currently available on a truck' })
+  availableTruckProducts(@Param('id', ParseIdPipe) id: ID, @Query() query: AvailableProductsQueryDto) {
+    return this.service.availableTruckProducts(String(id), query);
+  }
+
   @Get(':id') @ApiOperation({ summary: 'Get truck and full inventory' })
   findOne(@Param('id', ParseIdPipe) id: ID) { return this.service.findOne(id); }
 

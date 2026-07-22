@@ -10,6 +10,8 @@ import { ChangePasswordDto } from '../auth/dtos/change-password.dto';
 import { Logger } from '@nestjs/common'; // Thêm import này
 import { ChangeUserStatusDto, CreateUserDto, UpdateUserDto, UserListQueryDto } from './dtos/create-user.dto';
 import { UserStatus } from './schemas/users.schema';
+import { Invoices } from '../invoices/schemas/invoices.schema';
+import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
 
 @Injectable()
 export class UsersService {
@@ -17,6 +19,8 @@ export class UsersService {
   constructor(
     @InjectModel(Users)
     private readonly userModel: ReturnModelType<typeof Users>,
+    @InjectModel(Invoices)
+    private readonly invoiceModel: ReturnModelType<typeof Invoices>,
   ) {}
 
   async getTest() {
@@ -234,6 +238,17 @@ export class UsersService {
 
   async markLogin(id: string) {
     await this.userModel.updateOne({ _id: id }, { lastLoginAt: new Date() });
+  }
+
+  async salesKpi(id: string, from?: string, to?: string) {
+    if (!await this.userModel.exists({ _id: id, isDeleted: false })) throw new NotFoundException('Không tìm thấy nhân viên');
+    const filter: any = { salespersonId: id, isDeleted: false };
+    if (from || to) { filter.date = {}; if (from) filter.date.$gte = vietnamDateBoundary(from, false); if (to) filter.date.$lte = vietnamDateBoundary(to, true); }
+    const invoices: any[] = await this.invoiceModel.find(filter).select('customerId subtotal discountAmount grandTotal totalAmount paidAmount debtAmount').lean();
+    const grossRevenue = invoices.reduce((sum, item) => sum + (item.subtotal ?? item.totalAmount ?? 0), 0);
+    const discountAmount = invoices.reduce((sum, item) => sum + (item.discountAmount || 0), 0);
+    const netRevenue = invoices.reduce((sum, item) => sum + (item.grandTotal ?? item.totalAmount ?? 0), 0);
+    return { data: { invoiceCount: invoices.length, grossRevenue, discountAmount, netRevenue, paidAmount: invoices.reduce((sum, item) => sum + (item.paidAmount || 0), 0), debtAmount: invoices.reduce((sum, item) => sum + (item.debtAmount ?? Math.max(0, (item.totalAmount || 0) - (item.paidAmount || 0))), 0), averageInvoiceValue: invoices.length ? Math.round(netRevenue / invoices.length) : 0, uniqueCustomers: new Set(invoices.map((item) => item.customerId && String(item.customerId)).filter(Boolean)).size } };
   }
 
   async wakeup() {

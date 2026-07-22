@@ -6,6 +6,8 @@ import { Products } from '../products/schemas/products.schema';
 import { Customers } from '../customers/schemas/customers.schema';
 import { AssignVoucherDto, CreatePromotionDto, PromotionQueryDto, UpdatePromotionDto, UseVoucherDto } from './dtos/promotions.dto';
 import { DiscountType, Promotions, PromotionScope, PromotionStatus, PromotionType, Vouchers, VoucherStatus } from './schemas/promotions.schema';
+import { Invoices } from '../invoices/schemas/invoices.schema';
+import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
 
 @Injectable()
 export class PromotionsService {
@@ -15,6 +17,7 @@ export class PromotionsService {
     @InjectModel(Products) private readonly productModel: ReturnModelType<typeof Products>,
     @InjectModel(Categories) private readonly categoryModel: ReturnModelType<typeof Categories>,
     @InjectModel(Customers) private readonly customerModel: ReturnModelType<typeof Customers>,
+    @InjectModel(Invoices) private readonly invoiceModel: ReturnModelType<typeof Invoices>,
   ) {}
 
   private positiveInt(value: string | undefined, fallback: number, max?: number) {
@@ -151,5 +154,19 @@ export class PromotionsService {
     if (!updated) throw new ConflictException('Voucher đã được sử dụng');
     await this.model.updateOne({ _id: promotion._id }, { $inc: { used: 1 } });
     return { data: updated };
+  }
+
+  async performance(id: string, from?: string, to?: string) {
+    if (!await this.model.exists({ _id: id, isDeleted: false })) throw new NotFoundException('Không tìm thấy chương trình');
+    const filter: any = { promotionId: id, isDeleted: false };
+    if (from || to) { filter.date = {}; if (from) filter.date.$gte = vietnamDateBoundary(from, false); if (to) filter.date.$lte = vietnamDateBoundary(to, true); }
+    const invoices: any[] = await this.invoiceModel.find(filter).select('customerId subtotal discountAmount grandTotal totalAmount').lean();
+    return { data: { invoiceCount: invoices.length, grossRevenue: invoices.reduce((sum, x) => sum + (x.subtotal ?? x.totalAmount ?? 0), 0), discountAmount: invoices.reduce((sum, x) => sum + (x.discountAmount || 0), 0), netRevenue: invoices.reduce((sum, x) => sum + (x.grandTotal ?? x.totalAmount ?? 0), 0), uniqueCustomers: new Set(invoices.map((x) => x.customerId && String(x.customerId)).filter(Boolean)).size } };
+  }
+
+  async promotionInvoices(id: string, pageValue?: string, limitValue?: string): Promise<any> {
+    const page = this.positiveInt(pageValue, 1); const limit = this.positiveInt(limitValue, 20, 100); const filter = { promotionId: id, isDeleted: false };
+    const [data, totalItems] = await Promise.all([this.invoiceModel.find(filter).sort({ date: -1 }).skip((page - 1) * limit).limit(limit).select('code date customer customerId subtotal discountAmount grandTotal totalAmount').lean(), this.invoiceModel.countDocuments(filter)]);
+    return { data, meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }
 }

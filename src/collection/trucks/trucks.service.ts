@@ -216,6 +216,20 @@ export class TrucksService {
     return { data: employees.map((employee: any) => ({ id: String(employee._id), employeeCode: employee.employeeCode, fullName: employee.fullName, phone: employee.phone, status: employee.status, assignedTruck: assignmentByDriver.get(String(employee._id)) || null })) };
   }
 
+  async availableTruckProducts(truckId: string, query: AvailableProductsQueryDto) {
+    const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100);
+    const truck: any = await this.model.findOne({ _id: truckId, isDeleted: false }).select('inventory').lean();
+    if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
+    const quantities = new Map((truck.inventory || []).filter((item) => item.qty > 0).map((item) => [String(item.productId), item.qty]));
+    const filter: any = { _id: { $in: [...quantities.keys()] }, isDeleted: false };
+    if (query.search?.trim()) {
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [{ code: { $regex: escaped, $options: 'i' } }, { name: { $regex: escaped, $options: 'i' } }, { barcode: { $regex: escaped, $options: 'i' } }];
+    }
+    const [products, totalItems] = await Promise.all([this.productModel.find(filter).sort({ code: 1 }).skip((page - 1) * limit).limit(limit).lean(), this.productModel.countDocuments(filter)]);
+    return { data: products.map((product: any) => ({ id: String(product._id), productId: String(product._id), code: product.code, name: product.name, unit: product.unit || '', quantity: quantities.get(String(product._id)) || 0, sellPrice: product.sellPrice || 0 })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+  }
+
   private mergedItems(items: Array<{ productId: string; qty: number }>) {
     if (!Array.isArray(items) || !items.length) throw new BadRequestException('Phiếu phải có ít nhất một sản phẩm');
     const merged = new Map<string, number>();

@@ -1,10 +1,10 @@
-import { Body, Delete, Get, Param, Post, Put, Res, StreamableFile } from '@nestjs/common';
+import { Body, Delete, Get, Param, Post, Put, Query, Res, StreamableFile } from '@nestjs/common';
 import { ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { ProductsService } from 'src/collection/products/products.service';
-import { CreateProductDto, ImportProductsDto, UpdateProductDto } from 'src/collection/products/dtos/products.dto';
+import { CreateProductDto, ImportProductsDto, ProductListQueryDto, UpdateProductDto } from 'src/collection/products/dtos/products.dto';
 import { Response } from 'express';
 
 @WarehouseController(['products'])
@@ -19,8 +19,8 @@ export class ProductsController {
 
   @ApiOperation({ summary: 'Get all products' })
   @Get()
-  async findAll() {
-    return await this.service.findAll();
+  async findAll(@Query() query: ProductListQueryDto) {
+    return await this.service.findAll(query);
   }
 
   @ApiOperation({ summary: 'Export all products to XLSX' })

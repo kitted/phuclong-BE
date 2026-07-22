@@ -7,6 +7,12 @@ export class Products extends BaseModel {
   @prop({ required: true, unique: true })
   code: string;
 
+  @prop({ required: false, sparse: true, unique: true })
+  barcode?: string;
+
+  @prop({ required: false })
+  productType?: string;
+
   @prop({ required: true })
   name: string;
 

@@ -35,6 +35,12 @@ export class UsersController {
     return this.service.findOneAdmin(String(id));
   }
 
+  @ApiOperation({ summary: 'Get employee sales KPI' })
+  @Get(':id/sales-kpi')
+  salesKpi(@Param('id', ParseIdPipe) id: ID, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.service.salesKpi(String(id), from, to);
+  }
+
   @ApiOperation({ summary: 'Update employee' })
   @Patch(':id')
   update(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateUserDto) {

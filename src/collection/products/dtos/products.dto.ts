@@ -14,6 +14,9 @@ export class CreateProductDto {
   @IsNotEmpty()
   code: string;
 
+  @ApiProperty({ required: false }) @IsString() @IsOptional() barcode?: string;
+  @ApiProperty({ required: false }) @IsString() @IsOptional() productType?: string;
+
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
@@ -62,4 +65,10 @@ export class ImportProductsDto {
   @ApiProperty({ type: 'array', items: { type: 'object', additionalProperties: true } })
   @IsArray()
   rows: Record<string, unknown>[];
+}
+
+export class ProductListQueryDto {
+  @ApiProperty({ required: false }) @IsOptional() search?: string;
+  @ApiProperty({ required: false, default: 1 }) @IsOptional() page?: string;
+  @ApiProperty({ required: false, default: 20 }) @IsOptional() limit?: string;
 }

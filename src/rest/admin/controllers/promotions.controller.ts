@@ -19,6 +19,12 @@ export class PromotionsController {
   @Get(':id') @ApiOperation({ summary: 'Get promotion detail' })
   findOne(@Param('id', ParseIdPipe) id: ID): Promise<any> { return this.service.findOne(String(id)); }
 
+  @Get(':id/performance') @ApiOperation({ summary: 'Get promotion invoice performance' })
+  performance(@Param('id', ParseIdPipe) id: ID, @Query('from') from?: string, @Query('to') to?: string) { return this.service.performance(String(id), from, to); }
+
+  @Get(':id/invoices') @ApiOperation({ summary: 'Get invoices using promotion' })
+  invoices(@Param('id', ParseIdPipe) id: ID, @Query('page') page?: string, @Query('limit') limit?: string): Promise<any> { return this.service.promotionInvoices(String(id), page, limit); }
+
   @Post() @ApiOperation({ summary: 'Create promotion' })
   create(@Body() dto: CreatePromotionDto) { return this.service.create(dto); }
 

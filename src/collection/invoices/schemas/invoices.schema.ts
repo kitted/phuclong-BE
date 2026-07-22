@@ -1,51 +1,62 @@
+import { index, prop, Ref } from '@typegoose/typegoose';
 import { BaseModel } from '../../../core/base.model';
-import { prop, Ref } from '@typegoose/typegoose';
-import { Products } from 'src/collection/products/schemas/products.schema';
-import { Trucks } from 'src/collection/trucks/schemas/trucks.schema';
-import { Customers } from 'src/collection/customers/schemas/customers.schema';
+import { Products } from '../../products/schemas/products.schema';
+import { Trucks } from '../../trucks/schemas/trucks.schema';
+import { Customers } from '../../customers/schemas/customers.schema';
+import { Promotions, Vouchers } from '../../promotions/schemas/promotions.schema';
+import { Users } from '../../users/schemas/users.schema';
 
-export class InvoiceItem {
-  @prop({ ref: () => Products, required: true })
-  productId: Ref<Products>;
+export enum PaymentMethod { CASH = 'CASH', BANK_TRANSFER = 'BANK_TRANSFER' }
+export enum InvoicePaymentStatus { UNPAID = 'UNPAID', PARTIAL = 'PARTIAL', PAID = 'PAID' }
 
-  @prop({ required: true, default: 0 })
-  qty: number;
-
-  @prop({ required: true, default: 0 })
-  price: number;
+export class InvoicePayment {
+  @prop({ required: true, enum: PaymentMethod }) method: PaymentMethod;
+  @prop({ required: true, min: 0 }) amount: number;
+  @prop() referenceCode?: string;
+  @prop() bankName?: string;
+  @prop() note?: string;
 }
 
+export class InvoiceItem {
+  @prop({ ref: () => Products, required: true }) productId: Ref<Products>;
+  @prop({ required: true }) productCode: string;
+  @prop({ required: true }) productName: string;
+  @prop() unit?: string;
+  @prop({ required: true, min: 1 }) qty: number;
+  @prop({ required: true, min: 0 }) price: number;
+  @prop({ required: true, min: 0 }) lineTotal: number;
+}
+
+@index({ salespersonId: 1, date: -1 })
+@index({ promotionId: 1, date: -1 })
 export class Invoices extends BaseModel {
-  @prop({ required: true, unique: true })
-  code: string;
-
-  @prop({ required: true })
-  date: string;
-
-  @prop({ required: true })
-  customer: string;
-
-  @prop({ ref: () => Customers, required: false, default: null, index: true })
-  customerId?: Ref<Customers>;
-
-  @prop({ default: 0, min: 0 })
-  paidAmount: number;
-
-  @prop({ default: 'UNPAID', enum: ['UNPAID', 'PARTIAL', 'PAID'] })
-  paymentStatus: string;
-
-  @prop({ required: true, enum: ['warehouse', 'truck'] })
-  sourceType: string;
-
-  @prop({ ref: () => Trucks })
-  truckId?: Ref<Trucks>;
-
-  @prop()
-  note?: string;
-
-  @prop({ default: 0 })
-  totalAmount: number;
-
-  @prop({ type: () => [InvoiceItem], default: [] })
-  items: InvoiceItem[];
+  @prop({ required: true, unique: true }) code: string;
+  @prop({ required: true }) date: Date;
+  @prop({ default: 'Khách lẻ' }) customer: string;
+  @prop({ ref: () => Customers, default: null, index: true }) customerId?: Ref<Customers>;
+  @prop({ required: true, enum: ['warehouse', 'truck'] }) sourceType: string;
+  @prop({ ref: () => Trucks }) truckId?: Ref<Trucks>;
+  @prop() note?: string;
+  @prop({ required: true, min: 0 }) subtotal: number;
+  @prop({ default: 0, min: 0 }) discountAmount: number;
+  @prop({ required: true, min: 0 }) grandTotal: number;
+  @prop({ required: true, min: 0 }) totalAmount: number;
+  @prop({ type: () => [InvoicePayment], default: [] }) payments: InvoicePayment[];
+  @prop({ default: 0, min: 0 }) paidAmount: number;
+  @prop({ default: 0, min: 0 }) debtAmount: number;
+  @prop({ default: false }) debtLimitOverridden: boolean;
+  @prop() debtOverrideReason?: string;
+  @prop({ enum: InvoicePaymentStatus, default: InvoicePaymentStatus.UNPAID }) paymentStatus: InvoicePaymentStatus;
+  @prop({ ref: () => Promotions }) promotionId?: Ref<Promotions>;
+  @prop() promotionCode?: string;
+  @prop() promotionName?: string;
+  @prop({ ref: () => Vouchers }) voucherId?: Ref<Vouchers>;
+  @prop() voucherCode?: string;
+  @prop() discountType?: string;
+  @prop() discountValue?: number;
+  @prop({ ref: () => Users, required: true, index: true }) salespersonId: Ref<Users>;
+  @prop({ required: true }) salespersonCode: string;
+  @prop({ required: true }) salespersonName: string;
+  @prop({ ref: () => Users }) createdBy?: Ref<Users>;
+  @prop({ type: () => [InvoiceItem], default: [] }) items: InvoiceItem[];
 }
