@@ -13,6 +13,9 @@ export class Products extends BaseModel {
   @prop({ required: false })
   productType?: string;
 
+  @prop({ required: false, index: true })
+  brandId?: string;
+
   @prop({ required: true })
   name: string;
 

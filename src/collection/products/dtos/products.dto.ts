@@ -16,6 +16,7 @@ export class CreateProductDto {
 
   @ApiProperty({ required: false }) @IsString() @IsOptional() barcode?: string;
   @ApiProperty({ required: false }) @IsString() @IsOptional() productType?: string;
+  @ApiProperty({ required: false }) @IsString() @IsOptional() brandId?: string;
 
   @ApiProperty()
   @IsString()

@@ -10,10 +10,11 @@ import { Users } from '../users/schemas/users.schema';
 import { Promotions, Vouchers } from '../promotions/schemas/promotions.schema';
 import { InvoiceCounters } from './schemas/invoice-counter.schema';
 import { Categories } from '../categories/schemas/categories.schema';
+import { PromotionRuleEngineService } from './promotion-rule-engine.service';
 
 @Module({
   imports: [TypegooseModule.forFeature([Invoices, Products, Trucks, Customers, Users, Promotions, Vouchers, InvoiceCounters, Categories]), InventoryMovementsModule],
-  providers: [InvoicesService],
+  providers: [InvoicesService, PromotionRuleEngineService],
   exports: [InvoicesService],
 })
 export class InvoicesModule {}

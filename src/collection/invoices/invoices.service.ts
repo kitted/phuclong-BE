@@ -2,19 +2,20 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { ReturnModelType } from '@typegoose/typegoose';
 import { getConnectionToken, InjectModel } from 'nestjs-typegoose';
 import { ClientSession, Connection, Types } from 'mongoose';
-import { Invoices, InvoicePaymentStatus, PaymentMethod } from './schemas/invoices.schema';
+import { Invoices, InvoiceLineType, InvoicePaymentStatus, PaymentMethod } from './schemas/invoices.schema';
 import { InvoiceCounters } from './schemas/invoice-counter.schema';
 import { Products } from '../products/schemas/products.schema';
 import { Trucks } from '../trucks/schemas/trucks.schema';
 import { Customers } from '../customers/schemas/customers.schema';
 import { Users, UserStatus } from '../users/schemas/users.schema';
 import { DiscountType, Promotions, PromotionScope, PromotionStatus, Vouchers, VoucherStatus } from '../promotions/schemas/promotions.schema';
-import { CreateInvoiceDto, InvoicePreviewDto } from './dtos/invoices.dto';
+import { ApplyGiftPromotionDto, CreateInvoiceDto, GiftPromotionPreviewDto, InvoicePreviewDto } from './dtos/invoices.dto';
 import { InventoryMovementsService } from '../inventory/inventory-movements.service';
 import { InventoryLocationType, InventoryMovementType } from '../inventory/schemas/inventory-movement.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
 import { ID } from '../../core/interfaces/id.interface';
 import { Categories } from '../categories/schemas/categories.schema';
+import { PromotionRuleEngineService } from './promotion-rule-engine.service';
 
 type Actor = { id?: string; role?: RoleEnum };
 
@@ -31,6 +32,7 @@ export class InvoicesService {
     @InjectModel(InvoiceCounters) private readonly counterModel: ReturnModelType<typeof InvoiceCounters>,
     @InjectModel(Categories) private readonly categoryModel: ReturnModelType<typeof Categories>,
     private readonly movements: InventoryMovementsService,
+    private readonly ruleEngine: PromotionRuleEngineService,
     @Inject(getConnectionToken()) private readonly connection: Connection,
   ) {}
 
@@ -54,7 +56,7 @@ export class InvoicesService {
     const productMap = new Map(products.map((product) => [String(product._id), product]));
     const items = requested.map((item) => {
       const product: any = productMap.get(item.productId); const price = Number(product.sellPrice) || 0;
-      return { productId: item.productId, productCode: product.code, productName: product.name, productType: product.productType || (product.categoryId ? categoryMap.get(String(product.categoryId)) : ''), unit: product.unit || '', categoryId: product.categoryId ? String(product.categoryId) : null, qty: item.qty, price, lineTotal: price * item.qty };
+      return { productId: item.productId, productCode: product.code, productName: product.name, productType: product.productType || (product.categoryId ? categoryMap.get(String(product.categoryId)) : ''), brandId: product.brandId, unit: product.unit || '', categoryId: product.categoryId ? String(product.categoryId) : null, qty: item.qty, price, lineTotal: price * item.qty, lineType: InvoiceLineType.SALE, originalPrice: price };
     });
     const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
     let discountAmount = 0; let promotion: any = null; let voucher: any = null; let eligibleItems: any[] = [];
@@ -98,6 +100,17 @@ export class InvoicesService {
     } };
   }
 
+  async giftPromotionsPreview(dto: GiftPromotionPreviewDto) {
+    const calculated = await this.calculate({ ...dto });
+    return { data: await this.ruleEngine.preview(calculated.items) };
+  }
+
+  async applyGiftPromotion(dto: ApplyGiftPromotionDto) {
+    const calculated = await this.calculate({ ...dto });
+    const applied = await this.ruleEngine.apply(dto.promotionId, calculated.items, dto.giftSelections);
+    return { data: { subtotal: calculated.subtotal, discountAmount: 0, grandTotal: calculated.subtotal, promotionApplication: { promotionId: String(applied.promotion._id), promotionCode: applied.promotion.code, promotionName: applied.promotion.name, applicationCount: applied.applicationCount, matchedConditions: applied.matchedConditions, gifts: applied.gifts }, items: [...calculated.items, ...applied.gifts.map((gift) => ({ ...gift, price: 0, originalPrice: gift.sellPrice, lineTotal: 0, lineType: InvoiceLineType.GIFT }))] } };
+  }
+
   private normalizedPayments(dto: CreateInvoiceDto) {
     const map = new Map<PaymentMethod, any>();
     for (const payment of dto.payments || []) {
@@ -119,6 +132,7 @@ export class InvoicesService {
     const date = dto.date ? new Date(dto.date) : new Date();
     if (Number.isNaN(date.getTime())) throw new BadRequestException('Ngày hóa đơn không hợp lệ');
     const payments = this.normalizedPayments(dto);
+    if ((dto.promotionApplications || []).length > 1) throw new BadRequestException('Mỗi hóa đơn chỉ được áp dụng một chương trình tặng quà');
     const session = await this.connection.startSession(); let response: any;
     try {
       await session.withTransaction(async () => {
@@ -127,6 +141,10 @@ export class InvoicesService {
         const customer: any = dto.customerId ? await this.customerModel.findOne({ _id: dto.customerId, isDeleted: false }).session(session) : null;
         if (dto.customerId && !customer) throw new BadRequestException('Khách hàng không tồn tại');
         const calculated = await this.calculate(dto, session);
+        const giftRequest = dto.promotionApplications?.[0];
+        const giftApplication = giftRequest ? await this.ruleEngine.apply(giftRequest.promotionId, calculated.items, giftRequest.giftSelections, session, false) : null;
+        const giftLines = giftApplication ? giftApplication.gifts.map((gift) => ({ ...gift, price: 0, originalPrice: gift.sellPrice, lineTotal: 0, lineType: InvoiceLineType.GIFT })) : [];
+        const inventoryLines = [...calculated.items, ...giftLines];
         const paidAmount = payments.reduce((sum, payment) => sum + payment.amount, 0);
         if (paidAmount > calculated.grandTotal) throw new BadRequestException('Số tiền thanh toán không được vượt tổng hóa đơn');
         const debtAmount = calculated.grandTotal - paidAmount;
@@ -142,30 +160,31 @@ export class InvoicesService {
         if (await this.model.exists({ code }).session(session)) throw new ConflictException('Mã hóa đơn đã tồn tại');
         const movementInputs: any[] = [];
         if (dto.sourceType === 'warehouse') {
-          for (const item of calculated.items) {
+          for (const item of inventoryLines) {
             const before: any = await this.productModel.findOneAndUpdate({ _id: item.productId, isDeleted: false, stock: { $gte: item.qty } }, { $inc: { stock: -item.qty } }, { new: false, session });
-            if (!before) throw new ConflictException({ code: 'INSUFFICIENT_STOCK', message: 'Số lượng tồn kho không đủ', details: { productId: item.productId, requestedQuantity: item.qty } });
-            movementInputs.push({ productId: item.productId, type: InventoryMovementType.WAREHOUSE_SALE, quantityChange: -item.qty, quantityBefore: before.stock, quantityAfter: before.stock - item.qty, sourceType: InventoryLocationType.WAREHOUSE });
+            if (!before) throw new ConflictException({ code: item.lineType === InvoiceLineType.GIFT ? 'INSUFFICIENT_GIFT_STOCK' : 'INSUFFICIENT_STOCK', message: item.lineType === InvoiceLineType.GIFT ? 'Sản phẩm quà không đủ tồn kho' : 'Số lượng tồn kho không đủ', details: { productId: item.productId, requestedQuantity: item.qty } });
+            movementInputs.push({ productId: item.productId, type: item.lineType === InvoiceLineType.GIFT ? InventoryMovementType.PROMOTION_GIFT_FROM_WAREHOUSE : InventoryMovementType.WAREHOUSE_SALE, quantityChange: -item.qty, quantityBefore: before.stock, quantityAfter: before.stock - item.qty, sourceType: InventoryLocationType.WAREHOUSE });
           }
         } else {
           const truck = await this.truckModel.findOne({ _id: dto.truckId, isDeleted: false }).session(session);
           if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
-          for (const item of calculated.items) {
+          for (const item of inventoryLines) {
             const before: any = await this.truckModel.findOneAndUpdate({ _id: dto.truckId, inventory: { $elemMatch: { productId: item.productId, qty: { $gte: item.qty } } } }, { $inc: { 'inventory.$.qty': -item.qty } }, { new: false, session });
-            if (!before) throw new ConflictException({ code: 'INSUFFICIENT_TRUCK_STOCK', message: 'Số lượng hàng trên xe không đủ', details: { truckId: dto.truckId, productId: item.productId, requestedQuantity: item.qty } });
+            if (!before) throw new ConflictException({ code: item.lineType === InvoiceLineType.GIFT ? 'INSUFFICIENT_GIFT_STOCK' : 'INSUFFICIENT_TRUCK_STOCK', message: item.lineType === InvoiceLineType.GIFT ? 'Sản phẩm quà không đủ trên xe' : 'Số lượng hàng trên xe không đủ', details: { truckId: dto.truckId, productId: item.productId, requestedQuantity: item.qty } });
             const available = before.inventory.find((entry) => String(entry.productId) === item.productId)?.qty || 0;
-            movementInputs.push({ productId: item.productId, type: InventoryMovementType.TRUCK_SALE, quantityChange: -item.qty, quantityBefore: available, quantityAfter: available - item.qty, sourceType: InventoryLocationType.TRUCK, sourceTruckId: dto.truckId });
+            movementInputs.push({ productId: item.productId, type: item.lineType === InvoiceLineType.GIFT ? InventoryMovementType.PROMOTION_GIFT_FROM_TRUCK : InventoryMovementType.TRUCK_SALE, quantityChange: -item.qty, quantityBefore: available, quantityAfter: available - item.qty, sourceType: InventoryLocationType.TRUCK, sourceTruckId: dto.truckId });
           }
           await this.truckModel.updateOne({ _id: dto.truckId }, { $pull: { inventory: { qty: { $lte: 0 } } } }, { session });
         }
         const paymentStatus = paidAmount === 0 ? InvoicePaymentStatus.UNPAID : paidAmount < calculated.grandTotal ? InvoicePaymentStatus.PARTIAL : InvoicePaymentStatus.PAID;
         const invoice: any = (await this.model.create([{
           code, date, customer: customer?.name || dto.customer || 'Khách lẻ', customerId: customer?._id,
-          sourceType: dto.sourceType, truckId: dto.truckId, note: dto.note, items: calculated.items,
+          sourceType: dto.sourceType, truckId: dto.truckId, note: dto.note, items: inventoryLines,
           subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, totalAmount: calculated.grandTotal,
           payments, paidAmount, debtAmount, paymentStatus, debtLimitOverridden: Boolean(dto.allowDebtLimitOverride), debtOverrideReason: dto.debtOverrideReason?.trim(),
           promotionId: calculated.promotion?._id, promotionCode: calculated.promotion?.code, promotionName: calculated.promotion?.name,
           voucherId: calculated.voucher?._id, voucherCode: calculated.voucher?.code, discountType: calculated.promotion?.discountType, discountValue: calculated.promotion?.discountValue,
+          promotionApplications: giftApplication ? [{ promotionId: giftApplication.promotion._id, promotionCode: giftApplication.promotion.code, promotionName: giftApplication.promotion.name, applicationCount: giftApplication.applicationCount, matchedConditions: giftApplication.matchedConditions, gifts: giftApplication.gifts }] : [],
           salespersonId: salesperson._id, salespersonCode: salesperson.employeeCode || '', salespersonName: salesperson.fullName || salesperson.username,
           createdBy: actor.id || undefined,
         }], { session }))[0];
@@ -174,6 +193,7 @@ export class InvoicesService {
           if (!claimed) throw new ConflictException('Voucher đã được sử dụng bởi giao dịch khác');
           await this.promotionModel.updateOne({ _id: calculated.promotion._id }, { $inc: { used: 1 } }, { session });
         }
+        if (giftApplication) await this.promotionModel.updateOne({ _id: giftApplication.promotion._id }, { $inc: { used: 1 } }, { session });
         if (customer && debtAmount > 0) {
           const debtFilter: any = { _id: customer._id, isDeleted: false };
           if (!dto.allowDebtLimitOverride && customer.debtLimit > 0) debtFilter.$expr = { $lte: [{ $add: ['$debt', debtAmount] }, '$debtLimit'] };

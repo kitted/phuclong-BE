@@ -5,7 +5,7 @@ import { Categories } from '../categories/schemas/categories.schema';
 import { Products } from '../products/schemas/products.schema';
 import { Customers } from '../customers/schemas/customers.schema';
 import { AssignVoucherDto, CreatePromotionDto, PromotionQueryDto, UpdatePromotionDto, UseVoucherDto } from './dtos/promotions.dto';
-import { DiscountType, Promotions, PromotionScope, PromotionStatus, PromotionType, Vouchers, VoucherStatus } from './schemas/promotions.schema';
+import { DiscountType, GiftSelectionMode, Promotions, PromotionConditionMetric, PromotionScope, PromotionStatus, PromotionType, Vouchers, VoucherStatus } from './schemas/promotions.schema';
 import { Invoices } from '../invoices/schemas/invoices.schema';
 import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
 
@@ -31,8 +31,10 @@ export class PromotionsService {
     const startAt = new Date(data.startAt); const endAt = new Date(data.endAt);
     if (!data.code?.trim() || !data.name?.trim()) throw new BadRequestException('Mã và tên chương trình là bắt buộc');
     if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) throw new BadRequestException('Thời gian kết thúc phải sau thời gian bắt đầu');
-    if (!(data.discountValue > 0)) throw new BadRequestException('Mức giảm phải lớn hơn 0');
-    if (data.discountType === DiscountType.PERCENT && data.discountValue > 100) throw new BadRequestException('Mức giảm phần trăm không được vượt quá 100');
+    const isDiscount = [PromotionType.VOUCHER, PromotionType.AUTO_DISCOUNT].includes(data.type);
+    const isGift = [PromotionType.BUY_X_GET_Y, PromotionType.BUNDLE_GIFT].includes(data.type);
+    if (isDiscount && (!data.discountType || !(data.discountValue > 0) || !data.scope)) throw new BadRequestException('Chương trình giảm giá cần loại, mức giảm và phạm vi áp dụng');
+    if (isDiscount && data.discountType === DiscountType.PERCENT && data.discountValue > 100) throw new BadRequestException('Mức giảm phần trăm không được vượt quá 100');
     if (data.scope === PromotionScope.CATEGORY) {
       if (!data.categoryIds?.length) throw new BadRequestException('Phải chọn ít nhất một danh mục');
       if (await this.categoryModel.countDocuments({ _id: { $in: data.categoryIds }, isDeleted: false }) !== data.categoryIds.length) throw new BadRequestException('Danh mục áp dụng không hợp lệ');
@@ -45,6 +47,25 @@ export class PromotionsService {
     if (data.type === PromotionType.VOUCHER && (!data.voucherPrefix?.trim() || !(data.quantity > 0) || !(data.usageLimitPerCustomer > 0))) {
       throw new BadRequestException('Voucher cần tiền tố, số lượng phát hành và giới hạn lượt dùng hợp lệ');
     }
+    if (isGift) {
+      if (!data.conditionGroups?.length || data.conditionGroups.some((group) => !group.conditions?.length)) throw new BadRequestException('Chương trình tặng quà cần ít nhất một nhóm điều kiện');
+      if (!data.giftGroups?.length) throw new BadRequestException('Chương trình cần ít nhất một nhóm quà');
+      for (const group of data.conditionGroups) for (const condition of group.conditions) {
+        const threshold = condition.metric === PromotionConditionMetric.QUANTITY ? condition.minimumQuantity : condition.metric === PromotionConditionMetric.AMOUNT ? condition.minimumAmount : condition.minimumPoints;
+        if (!(threshold > 0)) throw new BadRequestException('Ngưỡng điều kiện khuyến mãi phải lớn hơn 0');
+        if (condition.productIds?.length && await this.productModel.countDocuments({ _id: { $in: condition.productIds }, isDeleted: false }) !== condition.productIds.length) throw new BadRequestException('Sản phẩm trong điều kiện không hợp lệ');
+        if (condition.categoryIds?.length && await this.categoryModel.countDocuments({ _id: { $in: condition.categoryIds }, isDeleted: false }) !== condition.categoryIds.length) throw new BadRequestException('Danh mục trong điều kiện không hợp lệ');
+      }
+      const groupCodes = new Set<string>();
+      for (const gift of data.giftGroups) {
+        const normalizedCode = gift.code?.trim().toUpperCase();
+        if (!normalizedCode || groupCodes.has(normalizedCode)) throw new BadRequestException('Mã nhóm quà bắt buộc và không được trùng');
+        groupCodes.add(normalizedCode);
+        if (!(gift.giftQuantity > 0)) throw new BadRequestException('Số lượng quà phải lớn hơn 0');
+        if (gift.selectionMode !== GiftSelectionMode.SAME_AS_PURCHASED && !gift.productIds?.length) throw new BadRequestException('Nhóm quà cần danh sách sản phẩm');
+        if (gift.productIds?.length && await this.productModel.countDocuments({ _id: { $in: gift.productIds }, isDeleted: false }) !== gift.productIds.length) throw new BadRequestException('Sản phẩm quà không hợp lệ');
+      }
+    }
     if (data.status === PromotionStatus.ACTIVE && (new Date() < startAt || new Date() > endAt)) throw new BadRequestException('Chỉ có thể kích hoạt chương trình trong thời gian hiệu lực');
   }
 
@@ -52,7 +73,7 @@ export class PromotionsService {
     await this.validate(dto);
     const code = dto.code.trim().toUpperCase();
     if (await this.model.exists({ code, isDeleted: false })) throw new BadRequestException('Mã chương trình đã tồn tại');
-    return { data: await this.model.create({ ...dto, code, voucherPrefix: dto.voucherPrefix?.trim().toUpperCase(), activated: 0, used: 0 }) };
+    return { data: await this.model.create({ ...dto, code, voucherPrefix: dto.voucherPrefix?.trim().toUpperCase(), giftGroups: dto.giftGroups?.map((group) => ({ ...group, code: group.code.trim().toUpperCase() })), activated: 0, used: 0 }) };
   }
 
   async update(id: string, dto: UpdatePromotionDto) {
@@ -63,6 +84,7 @@ export class PromotionsService {
     const update: any = { ...dto };
     if (dto.code) update.code = dto.code.trim().toUpperCase();
     if (dto.voucherPrefix) update.voucherPrefix = dto.voucherPrefix.trim().toUpperCase();
+    if (dto.giftGroups) update.giftGroups = dto.giftGroups.map((group) => ({ ...group, code: group.code.trim().toUpperCase() }));
     return { data: await this.model.findByIdAndUpdate(id, update, { new: true }) };
   }
 
@@ -158,14 +180,14 @@ export class PromotionsService {
 
   async performance(id: string, from?: string, to?: string) {
     if (!await this.model.exists({ _id: id, isDeleted: false })) throw new NotFoundException('Không tìm thấy chương trình');
-    const filter: any = { promotionId: id, isDeleted: false };
+    const filter: any = { isDeleted: false, $or: [{ promotionId: id }, { 'promotionApplications.promotionId': id }] };
     if (from || to) { filter.date = {}; if (from) filter.date.$gte = vietnamDateBoundary(from, false); if (to) filter.date.$lte = vietnamDateBoundary(to, true); }
     const invoices: any[] = await this.invoiceModel.find(filter).select('customerId subtotal discountAmount grandTotal totalAmount').lean();
     return { data: { invoiceCount: invoices.length, grossRevenue: invoices.reduce((sum, x) => sum + (x.subtotal ?? x.totalAmount ?? 0), 0), discountAmount: invoices.reduce((sum, x) => sum + (x.discountAmount || 0), 0), netRevenue: invoices.reduce((sum, x) => sum + (x.grandTotal ?? x.totalAmount ?? 0), 0), uniqueCustomers: new Set(invoices.map((x) => x.customerId && String(x.customerId)).filter(Boolean)).size } };
   }
 
   async promotionInvoices(id: string, pageValue?: string, limitValue?: string): Promise<any> {
-    const page = this.positiveInt(pageValue, 1); const limit = this.positiveInt(limitValue, 20, 100); const filter = { promotionId: id, isDeleted: false };
+    const page = this.positiveInt(pageValue, 1); const limit = this.positiveInt(limitValue, 20, 100); const filter = { isDeleted: false, $or: [{ promotionId: id }, { 'promotionApplications.promotionId': id }] };
     const [data, totalItems] = await Promise.all([this.invoiceModel.find(filter).sort({ date: -1 }).skip((page - 1) * limit).limit(limit).select('code date customer customerId subtotal discountAmount grandTotal totalAmount').lean(), this.invoiceModel.countDocuments(filter)]);
     return { data, meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }

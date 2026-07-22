@@ -4,7 +4,7 @@ import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { InvoicesService } from 'src/collection/invoices/invoices.service';
-import { CreateInvoiceDto, InvoicePreviewDto } from 'src/collection/invoices/dtos/invoices.dto';
+import { ApplyGiftPromotionDto, CreateInvoiceDto, GiftPromotionPreviewDto, InvoicePreviewDto } from 'src/collection/invoices/dtos/invoices.dto';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
 
 @WarehouseController(['invoices'])
@@ -25,6 +25,18 @@ export class InvoicesController {
   @Post('preview')
   preview(@Body() dto: InvoicePreviewDto) {
     return this.service.preview(dto);
+  }
+
+  @ApiOperation({ summary: 'Find eligible and nearly eligible gift promotions' })
+  @Post('promotions/preview')
+  giftPromotionsPreview(@Body() dto: GiftPromotionPreviewDto) {
+    return this.service.giftPromotionsPreview(dto);
+  }
+
+  @ApiOperation({ summary: 'Validate gift selection and preview promotion application' })
+  @Post('promotions/apply')
+  applyGiftPromotion(@Body() dto: ApplyGiftPromotionDto) {
+    return this.service.applyGiftPromotion(dto);
   }
 
   @ApiOperation({ summary: 'Get all invoices' })

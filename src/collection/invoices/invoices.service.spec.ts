@@ -10,6 +10,7 @@ import { Users } from '../users/schemas/users.schema';
 import { Promotions, Vouchers } from '../promotions/schemas/promotions.schema';
 import { InventoryMovementsService } from '../inventory/inventory-movements.service';
 import { Categories } from '../categories/schemas/categories.schema';
+import { PromotionRuleEngineService } from './promotion-rule-engine.service';
 
 describe('InvoicesService dependency injection', () => {
   it('resolves all transaction models and the Typegoose connection', async () => {
@@ -18,6 +19,7 @@ describe('InvoicesService dependency injection', () => {
       InvoicesService,
       ...models.map((model) => ({ provide: getModelToken(model.name), useValue: {} })),
       { provide: InventoryMovementsService, useValue: {} },
+      { provide: PromotionRuleEngineService, useValue: {} },
       { provide: getConnectionToken(), useValue: { startSession: jest.fn() } },
     ] }).compile();
     expect(module.get(InvoicesService)).toBeDefined();

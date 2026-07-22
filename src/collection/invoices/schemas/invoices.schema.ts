@@ -8,6 +8,7 @@ import { Users } from '../../users/schemas/users.schema';
 
 export enum PaymentMethod { CASH = 'CASH', BANK_TRANSFER = 'BANK_TRANSFER' }
 export enum InvoicePaymentStatus { UNPAID = 'UNPAID', PARTIAL = 'PARTIAL', PAID = 'PAID' }
+export enum InvoiceLineType { SALE = 'SALE', GIFT = 'GIFT' }
 
 export class InvoicePayment {
   @prop({ required: true, enum: PaymentMethod }) method: PaymentMethod;
@@ -25,6 +26,41 @@ export class InvoiceItem {
   @prop({ required: true, min: 1 }) qty: number;
   @prop({ required: true, min: 0 }) price: number;
   @prop({ required: true, min: 0 }) lineTotal: number;
+  @prop({ enum: InvoiceLineType, default: InvoiceLineType.SALE }) lineType: InvoiceLineType;
+  @prop({ min: 0 }) originalPrice?: number;
+}
+
+export class InvoicePromotionGift {
+  @prop({ required: true }) groupCode: string;
+  @prop({ ref: () => Products, required: true }) productId: Ref<Products>;
+  @prop({ required: true }) productCode: string;
+  @prop({ required: true }) productName: string;
+  @prop() unit?: string;
+  @prop({ required: true, min: 1 }) qty: number;
+  @prop({ default: 0 }) costPrice: number;
+  @prop({ default: 0 }) sellPrice: number;
+}
+export class InvoiceMatchedCondition {
+  @prop({ required: true }) metric: string;
+  @prop({ required: true }) value: number;
+  @prop({ required: true }) threshold: number;
+  @prop({ required: true }) eligible: boolean;
+  @prop({ required: true }) applicationCount: number;
+  @prop({ required: true }) missing: number;
+}
+export class InvoiceMatchedConditionGroup {
+  @prop({ required: true }) combination: string;
+  @prop({ required: true }) eligible: boolean;
+  @prop({ required: true }) applicationCount: number;
+  @prop({ type: () => [InvoiceMatchedCondition], default: [] }) conditions: InvoiceMatchedCondition[];
+}
+export class InvoicePromotionApplication {
+  @prop({ ref: () => Promotions, required: true }) promotionId: Ref<Promotions>;
+  @prop({ required: true }) promotionCode: string;
+  @prop({ required: true }) promotionName: string;
+  @prop({ required: true, min: 1 }) applicationCount: number;
+  @prop({ type: () => [InvoiceMatchedConditionGroup], default: [] }) matchedConditions: InvoiceMatchedConditionGroup[];
+  @prop({ type: () => [InvoicePromotionGift], default: [] }) gifts: InvoicePromotionGift[];
 }
 
 @index({ salespersonId: 1, date: -1 })
@@ -54,6 +90,7 @@ export class Invoices extends BaseModel {
   @prop() voucherCode?: string;
   @prop() discountType?: string;
   @prop() discountValue?: number;
+  @prop({ type: () => [InvoicePromotionApplication], default: [] }) promotionApplications: InvoicePromotionApplication[];
   @prop({ ref: () => Users, required: true, index: true }) salespersonId: Ref<Users>;
   @prop({ required: true }) salespersonCode: string;
   @prop({ required: true }) salespersonName: string;

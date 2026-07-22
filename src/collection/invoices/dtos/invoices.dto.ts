@@ -19,6 +19,26 @@ export class InvoicePreviewDto {
   @ApiPropertyOptional() @IsOptional() @IsString() voucherCode?: string;
   @ApiProperty({ type: [InvoiceItemDto] }) @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => InvoiceItemDto) items: InvoiceItemDto[];
 }
+export class GiftSelectionItemDto {
+  @ApiProperty() @IsMongoId() productId: string;
+  @ApiProperty() @IsInt() @Min(1) qty: number;
+}
+export class GiftSelectionDto {
+  @ApiProperty() @IsString() groupCode: string;
+  @ApiProperty({ type: [GiftSelectionItemDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => GiftSelectionItemDto) items: GiftSelectionItemDto[];
+}
+export class PromotionApplicationDto {
+  @ApiProperty() @IsMongoId() promotionId: string;
+  @ApiProperty({ type: [GiftSelectionDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => GiftSelectionDto) giftSelections: GiftSelectionDto[];
+}
+export class GiftPromotionPreviewDto {
+  @ApiPropertyOptional() @IsOptional() @IsMongoId() customerId?: string;
+  @ApiProperty({ type: [InvoiceItemDto] }) @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => InvoiceItemDto) items: InvoiceItemDto[];
+}
+export class ApplyGiftPromotionDto extends GiftPromotionPreviewDto {
+  @ApiProperty() @IsMongoId() promotionId: string;
+  @ApiProperty({ type: [GiftSelectionDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => GiftSelectionDto) giftSelections: GiftSelectionDto[];
+}
 export class CreateInvoiceDto extends InvoicePreviewDto {
   @ApiPropertyOptional() @IsOptional() @IsString() code?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() date?: string;
@@ -30,4 +50,5 @@ export class CreateInvoiceDto extends InvoicePreviewDto {
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() allowDebtLimitOverride?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() debtOverrideReason?: string;
+  @ApiPropertyOptional({ type: [PromotionApplicationDto] }) @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PromotionApplicationDto) promotionApplications?: PromotionApplicationDto[];
 }
