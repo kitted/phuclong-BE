@@ -1,11 +1,12 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 import { CustomerSegment, CustomerSource } from '../schemas/customers.schema';
 import { Transform } from 'class-transformer';
+import { DebtLedgerType } from '../../debt-payments/schemas/customer-debt-ledger.schema';
 
 export class CreateCustomerDto {
   @ApiProperty() @IsString() @IsNotEmpty() name: string;
-  @ApiProperty() @IsString() @IsNotEmpty() phone: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() phone?: string;
   @ApiPropertyOptional() @IsOptional() @IsEmail() email?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() address?: string;
   @ApiPropertyOptional({ enum: CustomerSource }) @IsOptional() @IsEnum(CustomerSource) source?: CustomerSource;
@@ -37,4 +38,12 @@ export class ImportCustomersDto {
   @ApiProperty({ type: 'array', items: { type: 'object', additionalProperties: true } })
   @IsArray()
   rows: Record<string, unknown>[];
+}
+
+export class CustomerDebtHistoryQueryDto {
+  @ApiPropertyOptional() @IsOptional() @IsDateString() from?: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() to?: string;
+  @ApiPropertyOptional({ enum: DebtLedgerType }) @IsOptional() @IsEnum(DebtLedgerType) type?: DebtLedgerType;
+  @ApiPropertyOptional({ default: 1 }) @IsOptional() @Transform(({ value }) => Number(value)) @Min(1) page = 1;
+  @ApiPropertyOptional({ default: 20 }) @IsOptional() @Transform(({ value }) => Number(value)) @Min(1) @Max(100) limit = 20;
 }

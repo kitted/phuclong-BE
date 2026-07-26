@@ -114,6 +114,7 @@ export class Invoices extends BaseModel {
   @prop() promotionCode?: string;
   @prop() promotionName?: string;
   @prop({ ref: () => Vouchers }) voucherId?: Ref<Vouchers>;
+  @prop() giftCode?: string;
   @prop() voucherCode?: string;
   @prop() discountType?: string;
   @prop() discountValue?: number;

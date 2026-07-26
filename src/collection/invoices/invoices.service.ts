@@ -110,6 +110,18 @@ export class InvoicesService {
     return { items, subtotal, discountAmount, grandTotal, promotion, voucher, eligibleItems };
   }
 
+  private async directGiftLines(gifts: Array<{ productId: string; qty: number }> | undefined, session: ClientSession) {
+    if (!gifts?.length) return [];
+    const requested = this.mergeItems(gifts);
+    const products: any[] = await this.productModel.find({ _id: { $in: requested.map((item) => item.productId) }, isDeleted: false }).session(session).lean();
+    if (products.length !== requested.length) throw new BadRequestException('Một hoặc nhiều sản phẩm quà tặng không tồn tại');
+    const productMap = new Map(products.map((product) => [String(product._id), product]));
+    return requested.map((item) => {
+      const product: any = productMap.get(item.productId);
+      return { productId: item.productId, productCode: product.code, productName: product.name, unit: product.unit || '', qty: item.qty, price: 0, originalPrice: Number(product.sellPrice) || 0, costPrice: Number(product.costPrice) || 0, lineTotal: 0, lineType: InvoiceLineType.GIFT };
+    });
+  }
+
   async preview(dto: InvoicePreviewDto) {
     const calculated = await this.calculate(dto);
     return { data: {
@@ -152,6 +164,7 @@ export class InvoicesService {
     if (Number.isNaN(date.getTime())) throw new BadRequestException('Ngày hóa đơn không hợp lệ');
     const payments = this.normalizedPayments(dto);
     if ((dto.promotionApplications || []).length > 1) throw new BadRequestException('Mỗi hóa đơn chỉ được áp dụng một chương trình tặng quà');
+    if (dto.gifts?.length && dto.promotionApplications?.length) throw new BadRequestException('Không thể dùng đồng thời quà tặng trực tiếp và chương trình tặng quà');
     const session = await this.connection.startSession(); let response: any;
     try {
       await session.withTransaction(async () => {
@@ -160,10 +173,11 @@ export class InvoicesService {
         const customer: any = dto.customerId ? await this.customerModel.findOne({ _id: dto.customerId, isDeleted: false }).session(session) : null;
         if (dto.customerId && !customer) throw new BadRequestException('Khách hàng không tồn tại');
         const calculated = await this.calculate(dto, session);
+        const directGiftLines = await this.directGiftLines(dto.gifts, session);
         const giftRequest = dto.promotionApplications?.[0];
         const giftApplication = giftRequest ? await this.ruleEngine.apply(giftRequest.promotionId, calculated.items, giftRequest.giftSelections, session, false) : null;
         const giftLines = giftApplication ? giftApplication.gifts.map((gift) => ({ ...gift, price: 0, originalPrice: gift.sellPrice, lineTotal: 0, lineType: InvoiceLineType.GIFT })) : [];
-        const inventoryLines = [...calculated.items, ...giftLines];
+        const inventoryLines = [...calculated.items, ...giftLines, ...directGiftLines];
         const paidAmount = payments.reduce((sum, payment) => sum + payment.amount, 0);
         if (paidAmount > calculated.grandTotal) throw new BadRequestException('Số tiền thanh toán không được vượt tổng hóa đơn');
         const debtAmount = calculated.grandTotal - paidAmount;
@@ -177,28 +191,38 @@ export class InvoicesService {
         const counter: any = await this.counterModel.findOneAndUpdate({ key: `INVOICE_${day}` }, { $inc: { sequence: 1 } }, { upsert: true, new: true, session });
         const code = dto.code?.trim().toUpperCase() || `HD-${day.slice(2)}-${String(counter.sequence).padStart(6, '0')}`;
         if (await this.model.exists({ code }).session(session)) throw new ConflictException('Mã hóa đơn đã tồn tại');
+        let giftCode: string | undefined;
+        if (directGiftLines.length) {
+          const giftCounter: any = await this.counterModel.findOneAndUpdate({ key: `INVOICE_GIFT_${day}` }, { $inc: { sequence: 1 } }, { upsert: true, new: true, session });
+          giftCode = `QT-${day.slice(2)}-${String(giftCounter.sequence).padStart(4, '0')}`;
+        }
         const movementInputs: any[] = [];
+        const inventoryGroups = new Map<string, any[]>();
+        for (const item of inventoryLines) inventoryGroups.set(String(item.productId), [...(inventoryGroups.get(String(item.productId)) || []), item]);
         if (dto.sourceType === 'warehouse') {
-          for (const item of inventoryLines) {
-            const before: any = await this.productModel.findOneAndUpdate({ _id: item.productId, isDeleted: false, stock: { $gte: item.qty } }, { $inc: { stock: -item.qty } }, { new: false, session });
-            if (!before) throw new ConflictException({ code: item.lineType === InvoiceLineType.GIFT ? 'INSUFFICIENT_GIFT_STOCK' : 'INSUFFICIENT_STOCK', message: item.lineType === InvoiceLineType.GIFT ? 'Sản phẩm quà không đủ tồn kho' : 'Số lượng tồn kho không đủ', details: { productId: item.productId, requestedQuantity: item.qty } });
-            movementInputs.push({ productId: item.productId, type: item.lineType === InvoiceLineType.GIFT ? InventoryMovementType.PROMOTION_GIFT_FROM_WAREHOUSE : InventoryMovementType.WAREHOUSE_SALE, quantityChange: -item.qty, quantityBefore: before.stock, quantityAfter: before.stock - item.qty, sourceType: InventoryLocationType.WAREHOUSE });
+          for (const [productId, lines] of inventoryGroups) {
+            const totalQty = lines.reduce((sum, item) => sum + item.qty, 0);
+            const before: any = await this.productModel.findOneAndUpdate({ _id: productId, isDeleted: false, stock: { $gte: totalQty } }, { $inc: { stock: -totalQty } }, { new: false, session });
+            if (!before) throw new ConflictException({ code: lines.some((item) => item.lineType === InvoiceLineType.GIFT) ? 'INSUFFICIENT_GIFT_STOCK' : 'INSUFFICIENT_STOCK', message: 'Tổng số lượng bán và quà vượt tồn kho', details: { productId, requestedQuantity: totalQty } });
+            let quantityBefore = before.stock;
+            for (const item of lines) { const quantityAfter = quantityBefore - item.qty; movementInputs.push({ productId, type: item.lineType === InvoiceLineType.GIFT ? (directGiftLines.length ? InventoryMovementType.INVOICE_GIFT_FROM_WAREHOUSE : InventoryMovementType.PROMOTION_GIFT_FROM_WAREHOUSE) : InventoryMovementType.WAREHOUSE_SALE, quantityChange: -item.qty, quantityBefore, quantityAfter, sourceType: InventoryLocationType.WAREHOUSE }); quantityBefore = quantityAfter; }
           }
         } else {
           const truck = await this.truckModel.findOne({ _id: dto.truckId, isDeleted: false }).session(session);
           if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
-          for (const item of inventoryLines) {
-            const before: any = await this.truckModel.findOneAndUpdate({ _id: dto.truckId, inventory: { $elemMatch: { productId: item.productId, qty: { $gte: item.qty } } } }, { $inc: { 'inventory.$.qty': -item.qty } }, { new: false, session });
-            if (!before) throw new ConflictException({ code: item.lineType === InvoiceLineType.GIFT ? 'INSUFFICIENT_GIFT_STOCK' : 'INSUFFICIENT_TRUCK_STOCK', message: item.lineType === InvoiceLineType.GIFT ? 'Sản phẩm quà không đủ trên xe' : 'Số lượng hàng trên xe không đủ', details: { truckId: dto.truckId, productId: item.productId, requestedQuantity: item.qty } });
-            const available = before.inventory.find((entry) => String(entry.productId) === item.productId)?.qty || 0;
-            movementInputs.push({ productId: item.productId, type: item.lineType === InvoiceLineType.GIFT ? InventoryMovementType.PROMOTION_GIFT_FROM_TRUCK : InventoryMovementType.TRUCK_SALE, quantityChange: -item.qty, quantityBefore: available, quantityAfter: available - item.qty, sourceType: InventoryLocationType.TRUCK, sourceTruckId: dto.truckId });
+          for (const [productId, lines] of inventoryGroups) {
+            const totalQty = lines.reduce((sum, item) => sum + item.qty, 0);
+            const before: any = await this.truckModel.findOneAndUpdate({ _id: dto.truckId, inventory: { $elemMatch: { productId, qty: { $gte: totalQty } } } }, { $inc: { 'inventory.$.qty': -totalQty } }, { new: false, session });
+            if (!before) throw new ConflictException({ code: lines.some((item) => item.lineType === InvoiceLineType.GIFT) ? 'INSUFFICIENT_GIFT_STOCK' : 'INSUFFICIENT_TRUCK_STOCK', message: 'Tổng số lượng bán và quà vượt tồn kho trên xe', details: { truckId: dto.truckId, productId, requestedQuantity: totalQty } });
+            let quantityBefore = before.inventory.find((entry) => String(entry.productId) === productId)?.qty || 0;
+            for (const item of lines) { const quantityAfter = quantityBefore - item.qty; movementInputs.push({ productId, type: item.lineType === InvoiceLineType.GIFT ? (directGiftLines.length ? InventoryMovementType.INVOICE_GIFT_FROM_TRUCK : InventoryMovementType.PROMOTION_GIFT_FROM_TRUCK) : InventoryMovementType.TRUCK_SALE, quantityChange: -item.qty, quantityBefore, quantityAfter, sourceType: InventoryLocationType.TRUCK, sourceTruckId: dto.truckId }); quantityBefore = quantityAfter; }
           }
           await this.truckModel.updateOne({ _id: dto.truckId }, { $pull: { inventory: { qty: { $lte: 0 } } } }, { session });
         }
         const paymentStatus = paidAmount === 0 ? InvoicePaymentStatus.UNPAID : paidAmount < calculated.grandTotal ? InvoicePaymentStatus.PARTIAL : InvoicePaymentStatus.PAID;
         const paymentDueDate = dto.paymentDueDate ? new Date(dto.paymentDueDate) : dto.paymentTermDays ? new Date(date.getTime() + dto.paymentTermDays * 86400000) : undefined;
         const invoice: any = (await this.model.create([{
-          code, date, customer: customer?.name || dto.customer || 'Khách lẻ', customerId: customer?._id,
+          code, giftCode, date, customer: customer?.name || dto.customer || 'Khách lẻ', customerId: customer?._id,
           sourceType: dto.sourceType, truckId: dto.truckId, note: dto.note, items: inventoryLines,
           subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, totalAmount: calculated.grandTotal,
           payments, paidAmount, debtAmount, initialPaidAmount: paidAmount, initialDebtAmount: debtAmount, paymentStatus, paymentDueDate, paymentTermDays: dto.paymentTermDays, debtLimitOverridden: Boolean(dto.allowDebtLimitOverride), debtOverrideReason: dto.debtOverrideReason?.trim(),
@@ -221,10 +245,10 @@ export class InvoicesService {
           if (!dto.allowDebtLimitOverride && customer.debtLimit > 0) debtFilter.$expr = { $lte: [{ $add: ['$debt', debtAmount] }, '$debtLimit'] };
           const debtUpdated = await this.customerModel.findOneAndUpdate(debtFilter, { $inc: { debt: debtAmount } }, { new: true, session });
           if (!debtUpdated) throw new ConflictException({ code: 'CUSTOMER_DEBT_LIMIT_EXCEEDED', message: 'Công nợ khách hàng vừa thay đổi và đã vượt hạn mức' });
-          await this.debtLedgerModel.create([{ customerId: customer._id, customerCode: customer.code, type: DebtLedgerType.INVOICE_DEBT, direction: DebtLedgerDirection.INCREASE, amount: debtAmount, balanceAfter: debtUpdated.debt, occurredAt: date, referenceCode: code, invoiceId: invoice._id, createdBy: actor.id }], { session });
+          await this.debtLedgerModel.create([{ customerId: customer._id, customerCode: customer.code, type: DebtLedgerType.INVOICE_DEBT, direction: DebtLedgerDirection.INCREASE, amount: debtAmount, previousDebt: customer.debt || 0, increaseAmount: debtAmount, decreaseAmount: 0, balanceAfter: debtUpdated.debt, previousDebtLimit: customer.debtLimit || 0, debtLimitAfter: customer.debtLimit || 0, occurredAt: date, effectiveAt: date, referenceType: 'INVOICE', referenceId: String(invoice._id), referenceCode: code, invoiceId: invoice._id, createdBy: actor.id }], { session });
         }
         await this.movements.recordMany(movementInputs.map((movement) => ({ ...movement, referenceType: 'INVOICE', referenceId: String(invoice._id), referenceCode: code })), session);
-        response = { data: { id: String(invoice._id), code, subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, paidAmount, debtAmount, paymentStatus, promotionActivations: activation ? [{ id: String(activation._id), code: activation.code, status: activation.status }] : [] } };
+        response = { data: { id: String(invoice._id), code, giftCode, items: inventoryLines, subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, paidAmount, debtAmount, paymentStatus, promotionActivations: activation ? [{ id: String(activation._id), code: activation.code, status: activation.status }] : [] } };
       });
       return response;
     } finally { await session.endSession(); }
@@ -251,7 +275,7 @@ export class InvoicesService {
   async findAll(query: InvoiceQueryDto = {}, actor: Actor = {}): Promise<any> {
     const page = Math.max(1, Number(query.page) || 1); const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
     const filter = await this.invoiceFilter(query, actor);
-    const [rows, total] = await Promise.all([this.model.find(filter).select('-__v').sort({ date: -1, createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).populate('customerId', 'code name phone').populate('salespersonId', 'employeeCode fullName').lean(), this.model.countDocuments(filter)]);
+    const [rows, total] = await Promise.all([this.model.find(filter).select('-__v').sort({ date: -1, createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).populate('customerId', 'code name phone phones address').populate('salespersonId', 'employeeCode fullName').lean(), this.model.countDocuments(filter)]);
     const invoiceIds = rows.map((row: any) => row._id); const activations: any[] = invoiceIds.length ? await this.activationModel.find({ invoiceId: { $in: invoiceIds }, isDeleted: false }).select('invoiceId code status activatedAt').lean() : [];
     const byInvoice = new Map<string, any[]>(); for (const activation of activations) { const key = String(activation.invoiceId); byInvoice.set(key, [...(byInvoice.get(key) || []), activation]); }
     return { data: rows.map((row: any) => ({ ...row, id: String(row._id), activationCodes: byInvoice.get(String(row._id)) || [] })), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
@@ -269,7 +293,7 @@ export class InvoicesService {
   }
 
   async findOne(id: ID | string, actor: Actor = {}): Promise<any> {
-    const doc = await this.model.findOne({ _id: id, isDeleted: false, ...((actor.role === RoleEnum.STAFF && actor.id) ? { salespersonId: actor.id } : {}) }).populate('customerId', 'code name phone').populate('truckId', 'code name licensePlate').populate('salespersonId', 'employeeCode fullName').lean();
+    const doc = await this.model.findOne({ _id: id, isDeleted: false, ...((actor.role === RoleEnum.STAFF && actor.id) ? { salespersonId: actor.id } : {}) }).populate('customerId', 'code name phone phones address').populate('truckId', 'code name licensePlate').populate('salespersonId', 'employeeCode fullName').lean();
     if (!doc) throw new NotFoundException('Không tìm thấy hóa đơn');
     return { data: doc };
   }

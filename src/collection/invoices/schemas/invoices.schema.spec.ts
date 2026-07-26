@@ -9,6 +9,8 @@ describe('Invoices financial schema', () => {
     expect(schema.path('discountAmount')).toBeDefined();
     expect(schema.path('grandTotal')).toBeDefined();
     expect(schema.path('payments')).toBeDefined();
+    expect(schema.path('giftCode')).toBeDefined();
+    expect(schema.path('items')).toBeDefined();
   });
 
   it('requires the KPI salesperson snapshot', () => {

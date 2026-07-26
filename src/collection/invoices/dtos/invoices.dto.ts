@@ -7,6 +7,10 @@ export class InvoiceItemDto {
   @ApiProperty() @IsMongoId() productId: string;
   @ApiProperty() @IsInt() @Min(1) qty: number;
 }
+export class InvoiceGiftDto {
+  @ApiProperty() @IsMongoId() productId: string;
+  @ApiProperty() @IsInt() @Min(1) qty: number;
+}
 export class InvoicePaymentDto {
   @ApiProperty({ enum: PaymentMethod }) @IsEnum(PaymentMethod) method: PaymentMethod;
   @ApiProperty() @Min(0) amount: number;
@@ -53,6 +57,7 @@ export class CreateInvoiceDto extends InvoicePreviewDto {
   @ApiPropertyOptional() @IsOptional() @IsDateString() paymentDueDate?: string;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) paymentTermDays?: number;
   @ApiPropertyOptional({ type: [PromotionApplicationDto] }) @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PromotionApplicationDto) promotionApplications?: PromotionApplicationDto[];
+  @ApiPropertyOptional({ type: [InvoiceGiftDto] }) @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => InvoiceGiftDto) gifts?: InvoiceGiftDto[];
 }
 export class InvoiceQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsMongoId() salespersonId?: string;

@@ -1,7 +1,7 @@
 import { Body, Get, Param, Patch, Post, Query, Req, Res, StreamableFile } from '@nestjs/common';
 import { ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { CustomersService } from '../../../collection/customers/customers.service';
-import { CreateCustomerDto, CreateInteractionDto, CustomerQueryDto, ImportCustomersDto, UpdateCustomerDto } from '../../../collection/customers/dtos/customers.dto';
+import { CreateCustomerDto, CreateInteractionDto, CustomerDebtHistoryQueryDto, CustomerQueryDto, ImportCustomersDto, UpdateCustomerDto } from '../../../collection/customers/dtos/customers.dto';
 import { WarehouseController } from '../decorators/warehouse';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
@@ -43,8 +43,14 @@ export class CustomersController {
   @Get(':id/debt-payments') @ApiOperation({ summary: 'Get customer debt payment history' })
   customerDebtPayments(@Param('id', ParseIdPipe) id: ID, @Query() query: DebtPaymentQueryDto): Promise<any> { return this.debtPayments.findAll({ ...query, customerId: String(id) }); }
 
-  @Post('import') @AdminOnly() @ApiOperation({ summary: 'Bulk upsert customers parsed from Excel by phone' })
-  import(@Body() dto: ImportCustomersDto) { return this.service.importRows(dto.rows); }
+  @Get(':id/debt-history/chart') @ApiOperation({ summary: 'Get customer debt history chart' })
+  debtHistoryChart(@Param('id', ParseIdPipe) id: ID, @Query() query: CustomerDebtHistoryQueryDto) { return this.service.debtHistoryChart(String(id), query); }
+
+  @Get(':id/debt-history') @ApiOperation({ summary: 'Get paginated customer debt history' })
+  debtHistory(@Param('id', ParseIdPipe) id: ID, @Query() query: CustomerDebtHistoryQueryDto) { return this.service.debtHistory(String(id), query); }
+
+  @Post('import') @AdminOnly() @ApiOperation({ summary: 'Bulk upsert customers parsed from Excel by customer code' })
+  import(@Body() dto: ImportCustomersDto, @Req() request: AuthRequest) { const user: any = request.user; const doc = user?._doc || user; return this.service.importRows(dto.rows, String(doc?.id || doc?._id || '')); }
 
   @Get(':id') @ApiOperation({ summary: 'Get customer 360 profile' })
   findOne(@Param('id', ParseIdPipe) id: ID) { return this.service.findOne(String(id)); }
