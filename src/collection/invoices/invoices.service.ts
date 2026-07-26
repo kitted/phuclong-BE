@@ -182,8 +182,7 @@ export class InvoicesService {
         if (paidAmount > calculated.grandTotal) throw new BadRequestException('Số tiền thanh toán không được vượt tổng hóa đơn');
         const debtAmount = calculated.grandTotal - paidAmount;
         if (!customer && debtAmount > 0) throw new ConflictException('Khách lẻ phải thanh toán đủ');
-        if (dto.allowDebtLimitOverride && actor.role !== RoleEnum.ADMIN) throw new ForbiddenException('Chỉ quản trị viên được phép duyệt vượt hạn mức công nợ');
-        if (dto.allowDebtLimitOverride && !dto.debtOverrideReason?.trim()) throw new BadRequestException('Phải nhập lý do duyệt vượt hạn mức công nợ');
+        if (dto.allowDebtLimitOverride && !dto.debtOverrideReason?.trim()) throw new BadRequestException('Phải nhập lý do cho khách mua vượt hạn mức công nợ');
         if (customer?.debtLimit > 0 && customer.debt + debtAmount > customer.debtLimit && !dto.allowDebtLimitOverride) {
           throw new ConflictException({ code: 'CUSTOMER_DEBT_LIMIT_EXCEEDED', message: 'Hóa đơn làm vượt hạn mức công nợ', details: { currentDebt: customer.debt, invoiceDebt: debtAmount, projectedDebt: customer.debt + debtAmount, debtLimit: customer.debtLimit, exceededAmount: customer.debt + debtAmount - customer.debtLimit } });
         }
