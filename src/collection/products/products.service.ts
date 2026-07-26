@@ -8,6 +8,10 @@ import { Categories } from '../categories/schemas/categories.schema';
 import * as ExcelJS from 'exceljs';
 import { excelNumber, excelValue, normalizeExcelRow } from '../../core/excel-import';
 
+export function normalizeProductCode(value: unknown): string {
+  return String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
+}
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -83,7 +87,7 @@ export class ProductsService {
       const original = rows[index];
       try {
         const row = normalizeExcelRow(original);
-        const code = String(excelValue(row, ['Mã sản phẩm', 'Mã SP', 'code'])).trim().toUpperCase();
+        const code = normalizeProductCode(excelValue(row, ['Mã sản phẩm', 'Mã SP', 'code']));
         const name = String(excelValue(row, ['Tên sản phẩm', 'Tên', 'name'])).trim();
         if (!code || !name) throw new Error('Thiếu mã hoặc tên sản phẩm');
         const categoryName = String(excelValue(row, ['Danh mục', 'category'])).trim();
@@ -109,11 +113,30 @@ export class ProductsService {
           stock: Math.max(0, excelNumber(excelValue(row, ['Tồn kho', 'stock']))),
         };
         if (categoryId !== undefined) payload.categoryId = categoryId;
-        const existing = await this.model.findOne({ code, isDeleted: false }).select('_id').lean();
+        // Tìm cả bản ghi soft-delete vì `code` là unique trên toàn collection.
+        const existing = await this.model.findOne({ code }).select('_id isDeleted').lean();
         if (existing) {
-          await this.model.updateOne({ _id: existing._id }, { $set: payload }); updated++;
+          await this.model.updateOne(
+            { _id: existing._id },
+            { $set: { ...payload, isDeleted: false, deletedAt: null, deletedBy: null } },
+          );
+          updated++;
         } else {
-          await this.model.create(payload); created++;
+          try {
+            await this.model.create(payload);
+            created++;
+          } catch (error: any) {
+            // Hai batch có thể đồng thời không thấy mã rồi cùng create. Unique index
+            // quyết định winner; request còn lại chuyển sang update thay vì báo lỗi.
+            if (error?.code !== 11000) throw error;
+            const raced = await this.model.findOne({ code }).select('_id').lean();
+            if (!raced) throw error;
+            await this.model.updateOne(
+              { _id: raced._id },
+              { $set: { ...payload, isDeleted: false, deletedAt: null, deletedBy: null } },
+            );
+            updated++;
+          }
         }
       } catch (error) {
         errors.push({ row: index + 2, message: error instanceof Error ? error.message : 'Không thể lưu sản phẩm', data: original });
