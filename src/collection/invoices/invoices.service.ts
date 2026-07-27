@@ -21,6 +21,7 @@ import { PromotionActivations, PromotionActivationStatus } from '../promotion-ac
 import { InvoiceQueryDto } from './dtos/invoices.dto';
 import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
 import { CustomerDebtLedger, DebtLedgerDirection, DebtLedgerType } from '../debt-payments/schemas/customer-debt-ledger.schema';
+import { DebtPaymentCounters, DebtPayments } from '../debt-payments/schemas/debt-payments.schema';
 
 type Actor = { id?: string; role?: RoleEnum };
 
@@ -33,6 +34,13 @@ export function resolveInvoiceSalespersonId(requestedId: string | undefined, act
   if (!requestedId) throw new BadRequestException('Vui lòng chọn nhân viên bán hàng');
   if (!Types.ObjectId.isValid(requestedId)) throw new BadRequestException('salespersonId không hợp lệ');
   return String(requestedId);
+}
+
+export function calculateInvoiceDebtAllocation(receivedAmount: number, grandTotal: number, customerDebtBefore: number) {
+  const paidAmount = Math.min(receivedAmount, grandTotal);
+  const existingDebtPaidAmount = Math.min(customerDebtBefore, Math.max(0, receivedAmount - grandTotal));
+  const debtAmount = Math.max(0, grandTotal - paidAmount);
+  return { paidAmount, existingDebtPaidAmount, debtAmount, customerDebtAfter: customerDebtBefore + debtAmount - existingDebtPaidAmount };
 }
 
 @Injectable()
@@ -49,6 +57,8 @@ export class InvoicesService {
     @InjectModel(Categories) private readonly categoryModel: ReturnModelType<typeof Categories>,
     @InjectModel(PromotionActivations) private readonly activationModel: ReturnModelType<typeof PromotionActivations>,
     @InjectModel(CustomerDebtLedger) private readonly debtLedgerModel: ReturnModelType<typeof CustomerDebtLedger>,
+    @InjectModel(DebtPayments) private readonly debtPaymentModel: ReturnModelType<typeof DebtPayments>,
+    @InjectModel(DebtPaymentCounters) private readonly debtPaymentCounterModel: ReturnModelType<typeof DebtPaymentCounters>,
     private readonly movements: InventoryMovementsService,
     private readonly ruleEngine: PromotionRuleEngineService,
     private readonly activations: PromotionActivationsService,
@@ -157,6 +167,19 @@ export class InvoicesService {
     return `${shifted.getUTCFullYear()}${String(shifted.getUTCMonth() + 1).padStart(2, '0')}${String(shifted.getUTCDate()).padStart(2, '0')}`;
   }
 
+  private splitPayments(payments: any[], invoiceAmount: number) {
+    let invoiceRemaining = invoiceAmount;
+    const invoicePayments: any[] = []; const debtPayments: any[] = [];
+    for (const payment of payments) {
+      const invoicePart = Math.min(invoiceRemaining, payment.amount);
+      const debtPart = payment.amount - invoicePart;
+      if (invoicePart > 0) invoicePayments.push({ ...payment, amount: invoicePart });
+      if (debtPart > 0) debtPayments.push({ ...payment, amount: debtPart });
+      invoiceRemaining -= invoicePart;
+    }
+    return { invoicePayments, debtPayments };
+  }
+
   async create(dto: CreateInvoiceDto, actor: Actor = {}): Promise<any> {
     const salespersonId = resolveInvoiceSalespersonId(dto.salespersonId, actor);
     if (dto.sourceType === 'truck' && !dto.truckId) throw new BadRequestException('Phải chọn xe tải khi xuất từ xe');
@@ -178,13 +201,20 @@ export class InvoicesService {
         const giftApplication = giftRequest ? await this.ruleEngine.apply(giftRequest.promotionId, calculated.items, giftRequest.giftSelections, session, false) : null;
         const giftLines = giftApplication ? giftApplication.gifts.map((gift) => ({ ...gift, price: 0, originalPrice: gift.sellPrice, lineTotal: 0, lineType: InvoiceLineType.GIFT })) : [];
         const inventoryLines = [...calculated.items, ...giftLines, ...directGiftLines];
-        const paidAmount = payments.reduce((sum, payment) => sum + payment.amount, 0);
-        if (paidAmount > calculated.grandTotal) throw new BadRequestException('Số tiền thanh toán không được vượt tổng hóa đơn');
-        const debtAmount = calculated.grandTotal - paidAmount;
+        const receivedAmount = payments.reduce((sum, payment) => sum + payment.amount, 0);
+        if (dto.applyExcessToDebt && !customer) throw new BadRequestException('Chỉ khách hàng CRM mới được thanh toán kèm trừ nợ cũ');
+        if (!dto.applyExcessToDebt && receivedAmount > calculated.grandTotal) throw new BadRequestException('Số tiền thanh toán không được vượt tổng hóa đơn');
+        if (dto.applyExcessToDebt && receivedAmount > calculated.grandTotal + Number(customer?.debt || 0)) throw new BadRequestException('Số tiền nhận vượt tổng hóa đơn và công nợ cũ');
+        const allocation = calculateInvoiceDebtAllocation(receivedAmount, calculated.grandTotal, Number(customer?.debt || 0));
+        const paidAmount = allocation.paidAmount;
+        const existingDebtPaidAmount = dto.applyExcessToDebt ? allocation.existingDebtPaidAmount : 0;
+        const debtAmount = allocation.debtAmount;
+        const customerDebtAfter = customer ? Number(customer.debt || 0) + debtAmount - existingDebtPaidAmount : 0;
+        const split = this.splitPayments(payments, paidAmount);
         if (!customer && debtAmount > 0) throw new ConflictException('Khách lẻ phải thanh toán đủ');
         if (dto.allowDebtLimitOverride && !dto.debtOverrideReason?.trim()) throw new BadRequestException('Phải nhập lý do cho khách mua vượt hạn mức công nợ');
-        if (customer?.debtLimit > 0 && customer.debt + debtAmount > customer.debtLimit && !dto.allowDebtLimitOverride) {
-          throw new ConflictException({ code: 'CUSTOMER_DEBT_LIMIT_EXCEEDED', message: 'Hóa đơn làm vượt hạn mức công nợ', details: { currentDebt: customer.debt, invoiceDebt: debtAmount, projectedDebt: customer.debt + debtAmount, debtLimit: customer.debtLimit, exceededAmount: customer.debt + debtAmount - customer.debtLimit } });
+        if (customer?.debtLimit > 0 && customerDebtAfter > customer.debtLimit && !dto.allowDebtLimitOverride) {
+          throw new ConflictException({ code: 'CUSTOMER_DEBT_LIMIT_EXCEEDED', message: 'Hóa đơn làm vượt hạn mức công nợ', details: { currentDebt: customer.debt, invoiceDebt: debtAmount, existingDebtPaidAmount, projectedDebt: customerDebtAfter, debtLimit: customer.debtLimit, exceededAmount: customerDebtAfter - customer.debtLimit } });
         }
         const day = this.dayParts(date);
         const counter: any = await this.counterModel.findOneAndUpdate({ key: `INVOICE_${day}` }, { $inc: { sequence: 1 } }, { upsert: true, new: true, session });
@@ -224,7 +254,7 @@ export class InvoicesService {
           code, giftCode, date, customer: customer?.name || dto.customer || 'Khách lẻ', customerId: customer?._id,
           sourceType: dto.sourceType, truckId: dto.truckId, note: dto.note, items: inventoryLines,
           subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, totalAmount: calculated.grandTotal,
-          payments, paidAmount, debtAmount, initialPaidAmount: paidAmount, initialDebtAmount: debtAmount, paymentStatus, paymentDueDate, paymentTermDays: dto.paymentTermDays, debtLimitOverridden: Boolean(dto.allowDebtLimitOverride), debtOverrideReason: dto.debtOverrideReason?.trim(),
+          payments: split.invoicePayments, paidAmount, receivedAmount, existingDebtPaidAmount, debtAmount, initialPaidAmount: paidAmount, initialDebtAmount: debtAmount, paymentStatus, paymentDueDate, paymentTermDays: dto.paymentTermDays, debtLimitOverridden: Boolean(dto.allowDebtLimitOverride), debtOverrideReason: dto.debtOverrideReason?.trim(),
           promotionId: calculated.promotion?._id, promotionCode: calculated.promotion?.code, promotionName: calculated.promotion?.name,
           voucherId: calculated.voucher?._id, voucherCode: calculated.voucher?.code, discountType: calculated.promotion?.discountType, discountValue: calculated.promotion?.discountValue,
           promotionApplications: giftApplication ? [{ promotionId: giftApplication.promotion._id, promotionCode: giftApplication.promotion.code, promotionName: giftApplication.promotion.name, applicationCount: giftApplication.applicationCount, matchedConditions: giftApplication.matchedConditions, gifts: giftApplication.gifts }] : [],
@@ -239,15 +269,37 @@ export class InvoicesService {
           await this.promotionModel.updateOne({ _id: calculated.promotion._id }, { $inc: { used: 1 } }, { session });
         }
         if (giftApplication) await this.promotionModel.updateOne({ _id: giftApplication.promotion._id }, { $inc: { used: 1 } }, { session });
-        if (customer && debtAmount > 0) {
-          const debtFilter: any = { _id: customer._id, isDeleted: false };
-          if (!dto.allowDebtLimitOverride && customer.debtLimit > 0) debtFilter.$expr = { $lte: [{ $add: ['$debt', debtAmount] }, '$debtLimit'] };
-          const debtUpdated = await this.customerModel.findOneAndUpdate(debtFilter, { $inc: { debt: debtAmount } }, { new: true, session });
-          if (!debtUpdated) throw new ConflictException({ code: 'CUSTOMER_DEBT_LIMIT_EXCEEDED', message: 'Công nợ khách hàng vừa thay đổi và đã vượt hạn mức' });
-          await this.debtLedgerModel.create([{ customerId: customer._id, customerCode: customer.code, type: DebtLedgerType.INVOICE_DEBT, direction: DebtLedgerDirection.INCREASE, amount: debtAmount, previousDebt: customer.debt || 0, increaseAmount: debtAmount, decreaseAmount: 0, balanceAfter: debtUpdated.debt, previousDebtLimit: customer.debtLimit || 0, debtLimitAfter: customer.debtLimit || 0, occurredAt: date, effectiveAt: date, referenceType: 'INVOICE', referenceId: String(invoice._id), referenceCode: code, invoiceId: invoice._id, createdBy: actor.id }], { session });
+        let debtPaymentCode: string | undefined;
+        if (customer && (debtAmount > 0 || existingDebtPaidAmount > 0)) {
+          const netDebtChange = debtAmount - existingDebtPaidAmount;
+          const debtFilter: any = { _id: customer._id, isDeleted: false, debt: Number(customer.debt || 0) };
+          if (!dto.allowDebtLimitOverride && customer.debtLimit > 0) debtFilter.$expr = { $lte: [{ $add: ['$debt', netDebtChange] }, '$debtLimit'] };
+          const debtUpdated = await this.customerModel.findOneAndUpdate(debtFilter, { $inc: { debt: netDebtChange } }, { new: true, session });
+          if (!debtUpdated) throw new ConflictException({ code: 'CUSTOMER_DEBT_CHANGED', message: 'Công nợ khách hàng vừa thay đổi, vui lòng thử lại' });
+          if (debtAmount > 0) {
+            await this.debtLedgerModel.create([{ customerId: customer._id, customerCode: customer.code, type: DebtLedgerType.INVOICE_DEBT, direction: DebtLedgerDirection.INCREASE, amount: debtAmount, previousDebt: customer.debt || 0, increaseAmount: debtAmount, decreaseAmount: 0, balanceAfter: Number(customer.debt || 0) + debtAmount, previousDebtLimit: customer.debtLimit || 0, debtLimitAfter: customer.debtLimit || 0, occurredAt: date, effectiveAt: date, referenceType: 'INVOICE', referenceId: String(invoice._id), referenceCode: code, invoiceId: invoice._id, createdBy: actor.id }], { session });
+          }
+          if (existingDebtPaidAmount > 0) {
+            const collector: any = await this.userModel.findOne({ _id: actor.id, isDeleted: false, status: UserStatus.ACTIVE, role: { $in: [RoleEnum.ADMIN, RoleEnum.STAFF] } }).select('_id employeeCode fullName username role').session(session).lean();
+            if (!collector) throw new ForbiddenException('Tài khoản người thu không còn hoạt động');
+            const receiptCounter: any = await this.debtPaymentCounterModel.findOneAndUpdate({ key: `DEBT_PAYMENT_${day.slice(2)}` }, { $inc: { sequence: 1 } }, { upsert: true, new: true, session });
+            debtPaymentCode = `PTCN-${day.slice(2)}-${String(receiptCounter.sequence).padStart(6, '0')}`;
+            const receiptId = new Types.ObjectId(); let remaining = existingDebtPaidAmount; const allocations: any[] = [];
+            const oldInvoices: any[] = await this.model.find({ customerId: customer._id, debtAmount: { $gt: 0 }, isDeleted: false }).sort({ date: 1, _id: 1 }).session(session).lean();
+            for (const oldInvoice of oldInvoices) {
+              if (remaining <= 0) break;
+              const debtBefore = Number(oldInvoice.debtAmount || 0); const allocated = Math.min(remaining, debtBefore); const debtAfter = debtBefore - allocated; const paidAfter = Number(oldInvoice.paidAmount || 0) + allocated;
+              const result = await this.model.updateOne({ _id: oldInvoice._id, debtAmount: debtBefore, isDeleted: false }, { $set: { debtAmount: debtAfter, paidAmount: paidAfter, paymentStatus: debtAfter === 0 ? InvoicePaymentStatus.PAID : InvoicePaymentStatus.PARTIAL }, $push: { debtPayments: { receiptId: String(receiptId), receiptCode: debtPaymentCode, amount: allocated, paidAt: date } } }, { session });
+              if (result.modifiedCount !== 1) throw new ConflictException('Công nợ hóa đơn cũ vừa thay đổi, vui lòng thử lại');
+              allocations.push({ invoiceId: oldInvoice._id, invoiceCode: oldInvoice.code, amount: allocated, debtBefore, debtAfter }); remaining -= allocated;
+            }
+            await this.debtPaymentModel.create([{ _id: receiptId, code: debtPaymentCode, date, customerId: customer._id, customerCode: customer.code, customerName: customer.name, customerPhone: customer.phone || '', amount: existingDebtPaidAmount, payments: split.debtPayments, allocations, customerDebtBefore: customer.debt || 0, customerDebtAfter: Math.max(0, Number(customer.debt || 0) - existingDebtPaidAmount), note: `Thu nợ cũ cùng hóa đơn ${code}`, collectorId: collector._id, collectorCode: collector.employeeCode, collectorName: collector.fullName || collector.username, createdBy: collector._id, createdByRole: collector.role }], { session });
+            await this.model.updateOne({ _id: invoice._id }, { $set: { debtPaymentId: String(receiptId), debtPaymentCode } }, { session });
+            await this.debtLedgerModel.create([{ customerId: customer._id, customerCode: customer.code, type: DebtLedgerType.DEBT_PAYMENT, direction: DebtLedgerDirection.DECREASE, amount: existingDebtPaidAmount, previousDebt: Number(customer.debt || 0) + debtAmount, increaseAmount: 0, decreaseAmount: existingDebtPaidAmount, balanceAfter: customerDebtAfter, previousDebtLimit: customer.debtLimit || 0, debtLimitAfter: customer.debtLimit || 0, occurredAt: date, effectiveAt: date, referenceType: 'DEBT_PAYMENT', referenceId: String(receiptId), referenceCode: debtPaymentCode, debtPaymentId: receiptId, createdBy: String(collector._id), note: `Thu nợ cũ cùng hóa đơn ${code}` }], { session });
+          }
         }
         await this.movements.recordMany(movementInputs.map((movement) => ({ ...movement, referenceType: 'INVOICE', referenceId: String(invoice._id), referenceCode: code })), session);
-        response = { data: { id: String(invoice._id), code, giftCode, items: inventoryLines, subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, paidAmount, debtAmount, paymentStatus, promotionActivations: activation ? [{ id: String(activation._id), code: activation.code, status: activation.status }] : [] } };
+        response = { data: { id: String(invoice._id), code, giftCode, items: inventoryLines, subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, paidAmount, receivedAmount, existingDebtPaidAmount, debtAmount, customerDebtBefore: customer ? Number(customer.debt || 0) : 0, customerDebtAfter, debtPaymentCode, paymentStatus, promotionActivations: activation ? [{ id: String(activation._id), code: activation.code, status: activation.status }] : [] } };
       });
       return response;
     } finally { await session.endSession(); }

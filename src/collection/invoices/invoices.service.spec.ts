@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from 'nestjs-typegoose';
-import { InvoicesService, resolveInvoiceSalespersonId } from './invoices.service';
+import { calculateInvoiceDebtAllocation, InvoicesService, resolveInvoiceSalespersonId } from './invoices.service';
 import { Invoices } from './schemas/invoices.schema';
 import { InvoiceCounters } from './schemas/invoice-counter.schema';
 import { Products } from '../products/schemas/products.schema';
@@ -15,6 +15,7 @@ import { PromotionActivationsService } from '../promotion-activations/promotion-
 import { PromotionActivations } from '../promotion-activations/schemas/promotion-activations.schema';
 import { CustomerDebtLedger } from '../debt-payments/schemas/customer-debt-ledger.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
+import { DebtPaymentCounters, DebtPayments } from '../debt-payments/schemas/debt-payments.schema';
 
 describe('invoice salesperson authorization', () => {
   const staffId = '507f1f77bcf86cd799439011';
@@ -26,9 +27,18 @@ describe('invoice salesperson authorization', () => {
   it('accepts the selected salesperson for admin', () => expect(resolveInvoiceSalespersonId(otherId, { role: RoleEnum.ADMIN })).toBe(otherId));
 });
 
+describe('invoice payment with old debt allocation', () => {
+  it('pays invoice and clears all old debt', () => {
+    expect(calculateInvoiceDebtAllocation(500000, 300000, 200000)).toEqual({ paidAmount: 300000, existingDebtPaidAmount: 200000, debtAmount: 0, customerDebtAfter: 0 });
+  });
+  it('pays invoice and reduces old debt partially', () => {
+    expect(calculateInvoiceDebtAllocation(400000, 300000, 200000)).toEqual({ paidAmount: 300000, existingDebtPaidAmount: 100000, debtAmount: 0, customerDebtAfter: 100000 });
+  });
+});
+
 describe('InvoicesService dependency injection', () => {
   it('resolves all transaction models and the Typegoose connection', async () => {
-    const models = [Invoices, InvoiceCounters, Products, Trucks, Customers, Users, Promotions, Vouchers, Categories, PromotionActivations, CustomerDebtLedger];
+    const models = [Invoices, InvoiceCounters, Products, Trucks, Customers, Users, Promotions, Vouchers, Categories, PromotionActivations, CustomerDebtLedger, DebtPayments, DebtPaymentCounters];
     const module = await Test.createTestingModule({ providers: [
       InvoicesService,
       ...models.map((model) => ({ provide: getModelToken(model.name), useValue: {} })),

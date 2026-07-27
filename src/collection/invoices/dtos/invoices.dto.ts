@@ -53,6 +53,7 @@ export class CreateInvoiceDto extends InvoicePreviewDto {
   @ApiProperty({ type: [InvoicePaymentDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => InvoicePaymentDto) payments: InvoicePaymentDto[];
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() allowDebtLimitOverride?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() applyExcessToDebt?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() debtOverrideReason?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() paymentDueDate?: string;
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) paymentTermDays?: number;

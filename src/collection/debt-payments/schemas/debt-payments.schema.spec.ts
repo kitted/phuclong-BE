@@ -11,6 +11,10 @@ describe('DebtPayments responsibility snapshot', () => {
     expect(schema.path('createdByRole')).toBeDefined();
   });
 
+  it('allows receipts for customers without a phone number', () => {
+    expect(schema.path('customerPhone').options.required).not.toBe(true);
+  });
+
   it('indexes receipts by collector and newest date', () => {
     expect(schema.indexes()).toContainEqual([
       { collectorId: 1, date: -1 },

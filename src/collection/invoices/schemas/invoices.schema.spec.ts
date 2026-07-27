@@ -9,6 +9,9 @@ describe('Invoices financial schema', () => {
     expect(schema.path('discountAmount')).toBeDefined();
     expect(schema.path('grandTotal')).toBeDefined();
     expect(schema.path('payments')).toBeDefined();
+    expect(schema.path('receivedAmount')).toBeDefined();
+    expect(schema.path('existingDebtPaidAmount')).toBeDefined();
+    expect(schema.path('debtPaymentCode')).toBeDefined();
     expect(schema.path('giftCode')).toBeDefined();
     expect(schema.path('items')).toBeDefined();
   });
