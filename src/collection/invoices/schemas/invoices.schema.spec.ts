@@ -11,6 +11,8 @@ describe('Invoices financial schema', () => {
     expect(schema.path('payments')).toBeDefined();
     expect(schema.path('receivedAmount')).toBeDefined();
     expect(schema.path('existingDebtPaidAmount')).toBeDefined();
+    expect(schema.path('customerDebtBefore')).toBeDefined();
+    expect(schema.path('customerDebtAfter')).toBeDefined();
     expect(schema.path('debtPaymentCode')).toBeDefined();
     expect(schema.path('giftCode')).toBeDefined();
     expect(schema.path('items')).toBeDefined();
