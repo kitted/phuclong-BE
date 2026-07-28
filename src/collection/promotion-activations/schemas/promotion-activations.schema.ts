@@ -18,9 +18,9 @@ export class PromotionActivations extends BaseModel {
   @prop({ ref: () => Invoices, required: true, unique: true }) invoiceId: Ref<Invoices>;
   @prop({ required: true }) invoiceCode: string;
   @prop({ ref: () => Customers, required: true }) customerId: Ref<Customers>;
-  @prop({ required: true }) customerCode: string;
+  @prop() customerCode?: string;
   @prop({ required: true }) customerName: string;
-  @prop({ required: true }) customerPhone: string;
+  @prop() customerPhone?: string;
   @prop({ ref: () => Users, required: true }) salespersonId: Ref<Users>;
   @prop({ required: true }) salespersonCode: string;
   @prop({ required: true }) salespersonName: string;

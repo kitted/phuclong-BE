@@ -1,8 +1,8 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ReturnModelType } from '@typegoose/typegoose';
 import { getConnectionToken, InjectModel } from 'nestjs-typegoose';
 import { Connection } from 'mongoose';
-import { CustomerCounters, Customers } from './schemas/customers.schema';
+import { CustomerCodeStatus, CustomerCounters, Customers } from './schemas/customers.schema';
 import { CreateCustomerDto, CreateInteractionDto, CustomerDebtHistoryQueryDto, CustomerQueryDto, UpdateCustomerDto, UpdateCustomerStoreProfileDto } from './dtos/customers.dto';
 import { Invoices } from '../invoices/schemas/invoices.schema';
 import { Vouchers } from '../promotions/schemas/promotions.schema';
@@ -80,7 +80,55 @@ export class CustomersService {
 
   async create(dto: CreateCustomerDto) {
     const phones = normalizePhones(dto.phone); const phone = phones.join(', ') || undefined;
-    return { data: await this.model.create({ ...dto, phone, phones, name: dto.name.trim(), code: await this.nextCode() }) };
+    return { data: await this.model.create({ ...dto, phone, phones, name: dto.name.trim(), code: await this.nextCode(), codeStatus: CustomerCodeStatus.ASSIGNED }) };
+  }
+
+  async updateCode(id: string, codeValue: string, reasonValue: string, actorId?: string) {
+    await this.assertAdminActor(actorId);
+    const code = String(codeValue || '').trim().toUpperCase().replace(/\s+/g, '');
+    const reason = String(reasonValue || '').trim();
+    if (!code) throw new BadRequestException('Mã khách hàng không được để trống');
+    if (!reason) throw new BadRequestException('Phải nhập lý do cấp hoặc đổi mã');
+    const existing = await this.model.exists({ _id: { $ne: id }, code, isDeleted: false });
+    if (existing) throw new ConflictException({ code: 'CUSTOMER_CODE_ALREADY_EXISTS', message: 'Mã khách hàng đã thuộc khách hàng khác' });
+    const current: any = await this.model.findOne({ _id: id, isDeleted: false }).select('code').lean();
+    if (!current) throw new NotFoundException('Không tìm thấy khách hàng');
+    let customer: any;
+    try {
+      customer = await this.model.findOneAndUpdate(
+        { _id: id, isDeleted: false },
+        { $set: { code, codeStatus: CustomerCodeStatus.ASSIGNED }, $push: { codeHistory: { oldCode: current.code, newCode: code, changedBy: actorId, changedAt: new Date(), reason } } },
+        { new: true },
+      );
+    } catch (error: any) {
+      if (error?.code === 11000) throw new ConflictException({ code: 'CUSTOMER_CODE_ALREADY_EXISTS', message: 'Mã khách hàng đã thuộc khách hàng khác' });
+      throw error;
+    }
+    const match = /^KH(\d+)$/.exec(code);
+    if (match) await this.counterModel.updateOne({ key: 'CUSTOMER_CODE' }, { $max: { sequence: Number(match[1]) }, $setOnInsert: { key: 'CUSTOMER_CODE' } }, { upsert: true });
+    return { data: customer };
+  }
+
+  async deleteCustomer(id: string, reasonValue: string, actorId?: string) {
+    await this.assertAdminActor(actorId);
+    const reason = String(reasonValue || '').trim();
+    if (!reason) throw new BadRequestException('Phải nhập lý do xóa khách hàng');
+    const customer: any = await this.model.findOne({ _id: id, isDeleted: false }).select('debt').lean();
+    if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
+    if (Number(customer.debt || 0) > 0) throw new ConflictException({ code: 'CUSTOMER_HAS_OUTSTANDING_DEBT', message: 'Không thể xóa khách hàng còn công nợ' });
+    const deleted = await this.model.findOneAndUpdate(
+      { _id: id, isDeleted: false, debt: { $lte: 0 } },
+      { $set: { isDeleted: true, deletedAt: new Date(), deletedBy: actorId, deleteReason: reason } },
+      { new: true },
+    );
+    if (!deleted) throw new ConflictException({ code: 'CUSTOMER_STATE_CHANGED', message: 'Trạng thái khách hàng vừa thay đổi, vui lòng thử lại' });
+    return { data: deleted };
+  }
+
+  private async assertAdminActor(actorId?: string) {
+    if (!actorId) throw new ForbiddenException('Không xác định được người thực hiện');
+    const actor = await this.userModel.exists({ _id: actorId, isDeleted: false, status: UserStatus.ACTIVE, role: RoleEnum.ADMIN });
+    if (!actor) throw new ForbiddenException('Chỉ quản trị viên đang hoạt động được thực hiện thao tác này');
   }
 
   async update(id: string, dto: UpdateCustomerDto) {
@@ -108,15 +156,15 @@ export class CustomersService {
     if (query.zaloConnected === 'true' || query.zaloConnected === 'false') filter.zaloConnected = query.zaloConnected === 'true';
     const expressions: any[] = [];
     if (query.hasDebt === true || String(query.hasDebt) === 'true') expressions.push({ $gt: [{ $ifNull: ['$debt', 0] }, 0] });
-    if (query.debtWarning === true || String(query.debtWarning) === 'true') expressions.push({ $and: [{ $gt: [{ $ifNull: ['$debt', 0] }, 0] }, { $gte: [{ $ifNull: ['$debt', 0] }, { $ifNull: ['$debtLimit', 0] }] }] });
+    if (query.debtWarning === true || String(query.debtWarning) === 'true') expressions.push({ $and: [{ $gt: [{ $ifNull: ['$debtLimit', 0] }, 0] }, { $gte: [{ $ifNull: ['$debt', 0] }, { $ifNull: ['$debtLimit', 0] }] }] });
     if (expressions.length === 1) filter.$expr = expressions[0];
     else if (expressions.length > 1) filter.$expr = { $and: expressions };
     const [data, totalItems] = await Promise.all([
-      this.model.find(filter).select('code name phone phones email address source segment zaloConnected debt debtLimit note createdAt updatedAt storeLocation.latitude storeLocation.longitude storefrontImage.url').sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      this.model.find(filter).select('code codeStatus name phone phones email address source segment zaloConnected debt debtLimit note createdAt updatedAt storeLocation.latitude storeLocation.longitude storefrontImage.url').sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       this.model.countDocuments(filter),
     ]);
     return {
-      data: data.map((customer: any) => ({ ...customer, id: String(customer._id), ...customerStoreProfileFlags(customer), sourceLabel: SOURCE_LABELS[customer.source], segmentLabel: SEGMENT_LABELS[customer.segment], availableDebtLimit: customer.debtLimit > 0 ? Math.max(0, customer.debtLimit - (customer.debt || 0)) : 0, debtWarning: (customer.debt || 0) > 0 && (customer.debt || 0) >= (customer.debtLimit || 0) })),
+      data: data.map((customer: any) => ({ ...customer, id: String(customer._id), ...customerStoreProfileFlags(customer), sourceLabel: SOURCE_LABELS[customer.source], segmentLabel: SEGMENT_LABELS[customer.segment], availableDebtLimit: customer.debtLimit > 0 ? Math.max(0, customer.debtLimit - (customer.debt || 0)) : 0, debtWarning: (customer.debtLimit || 0) > 0 && (customer.debt || 0) >= customer.debtLimit })),
       meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) },
     };
   }
@@ -127,7 +175,7 @@ export class CustomersService {
       totalCustomers: rows.length,
       zaloConnected: rows.filter((x) => x.zaloConnected).length,
       leads: rows.filter((x) => x.source === 'LEAD').length,
-      debtWarnings: rows.filter((x) => (x.debt || 0) > 0 && (x.debt || 0) >= (x.debtLimit || 0)).length,
+      debtWarnings: rows.filter((x) => (x.debtLimit || 0) > 0 && (x.debt || 0) >= x.debtLimit).length,
       totalDebt: rows.reduce((sum, x) => sum + (x.debt || 0), 0),
     } };
   }
@@ -230,7 +278,7 @@ export class CustomersService {
     const customer: any = await this.model.findOne({ _id: id, isDeleted: false }).select('code storefrontImage').lean();
     if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
     this.configureCloudinary();
-    const uploaded = await this.uploadStorefrontBuffer(file.buffer, `customers/${customer.code}/storefront`);
+    const uploaded = await this.uploadStorefrontBuffer(file.buffer, `customers/${customer.code || id}/storefront`);
     const storefrontImage = {
       url: uploaded.secure_url, publicId: uploaded.public_id, width: uploaded.width,
       height: uploaded.height, format: uploaded.format, bytes: uploaded.bytes,
@@ -421,7 +469,7 @@ export class CustomersService {
           rowDuplicatePhone = Boolean(duplicatePhone);
           const previousDebt = Number(existing?.debt || 0); const previousDebtLimit = Number(existing?.debtLimit || 0);
           const debtAfter = importedDebt ?? previousDebt; const debtLimitAfter = importedDebtLimit ?? previousDebtLimit;
-          const setPayload = { ...payload, ...(importedDebt !== undefined ? { debt: debtAfter } : {}), ...(importedDebtLimit !== undefined ? { debtLimit: debtLimitAfter } : {}) };
+          const setPayload = { ...payload, codeStatus: CustomerCodeStatus.ASSIGNED, ...(importedDebt !== undefined ? { debt: debtAfter } : {}), ...(importedDebtLimit !== undefined ? { debtLimit: debtLimitAfter } : {}) };
           let customer: any;
           if (existing) customer = await this.model.findOneAndUpdate({ _id: existing._id }, { $set: setPayload }, { new: true, session });
           else { customer = (await this.model.create([{ ...setPayload, code, debt: debtAfter, debtLimit: debtLimitAfter }], { session }))[0]; rowCreated = true; }

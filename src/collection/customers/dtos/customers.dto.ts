@@ -17,6 +17,15 @@ export class CreateCustomerDto {
 }
 export class UpdateCustomerDto extends PartialType(CreateCustomerDto) {}
 
+export class UpdateCustomerCodeDto {
+  @IsString() @IsNotEmpty() code: string;
+  @IsString() @IsNotEmpty() @MaxLength(500) reason: string;
+}
+
+export class DeleteCustomerDto {
+  @IsString() @IsNotEmpty() @MaxLength(500) reason: string;
+}
+
 export class CustomerQueryDto {
   @ApiPropertyOptional() @IsOptional() search?: string;
   @ApiPropertyOptional({ enum: CustomerSource }) @IsOptional() @IsEnum(CustomerSource) source?: CustomerSource;

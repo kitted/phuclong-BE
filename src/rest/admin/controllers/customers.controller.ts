@@ -2,7 +2,7 @@ import { BadRequestException, Body, Delete, Get, Param, Patch, Post, Query, Req,
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { CustomersService } from '../../../collection/customers/customers.service';
-import { CreateCustomerDto, CreateInteractionDto, CustomerDebtHistoryQueryDto, CustomerQueryDto, ImportCustomerInteractionsDto, ImportCustomersDto, UpdateCustomerDto, UpdateCustomerStoreProfileDto } from '../../../collection/customers/dtos/customers.dto';
+import { CreateCustomerDto, CreateInteractionDto, CustomerDebtHistoryQueryDto, CustomerQueryDto, DeleteCustomerDto, ImportCustomerInteractionsDto, ImportCustomersDto, UpdateCustomerCodeDto, UpdateCustomerDto, UpdateCustomerStoreProfileDto } from '../../../collection/customers/dtos/customers.dto';
 import { WarehouseController } from '../decorators/warehouse';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
@@ -101,6 +101,12 @@ export class CustomersController {
   @Post('import') @AdminOnly() @ApiOperation({ summary: 'Bulk upsert customers parsed from Excel by customer code' })
   import(@Body() dto: ImportCustomersDto, @Req() request: AuthRequest) { const user: any = request.user; const doc = user?._doc || user; return this.service.importRows(dto.rows, String(doc?.id || doc?._id || '')); }
 
+  @Patch(':id/code') @AdminOnly() @ApiOperation({ summary: 'Assign or change customer code without rewriting historical snapshots' })
+  updateCode(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateCustomerCodeDto, @Req() request: AuthRequest) {
+    const user: any = request.user; const doc = user?._doc || user;
+    return this.service.updateCode(String(id), dto.code, dto.reason, String(doc?.id || doc?._id || ''));
+  }
+
   @Get(':id') @ApiOperation({ summary: 'Get customer 360 profile' })
   findOne(@Param('id', ParseIdPipe) id: ID) { return this.service.findOne(String(id)); }
 
@@ -109,6 +115,12 @@ export class CustomersController {
 
   @Patch(':id') @AdminOnly() @ApiOperation({ summary: 'Update customer' })
   update(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateCustomerDto) { return this.service.update(String(id), dto); }
+
+  @Delete(':id') @AdminOnly() @ApiOperation({ summary: 'Soft-delete a debt-free customer' })
+  remove(@Param('id', ParseIdPipe) id: ID, @Body() dto: DeleteCustomerDto, @Req() request: AuthRequest) {
+    const user: any = request.user; const doc = user?._doc || user;
+    return this.service.deleteCustomer(String(id), dto.reason, String(doc?.id || doc?._id || ''));
+  }
 
   @Post(':id/interactions') @AdminOnly() @ApiOperation({ summary: 'Record customer interaction' })
   interaction(@Param('id', ParseIdPipe) id: ID, @Body() dto: CreateInteractionDto) { return this.service.addInteraction(String(id), dto); }

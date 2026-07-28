@@ -23,4 +23,11 @@ describe('Invoices financial schema', () => {
     expect(schema.path('salespersonCode').options.required).toBe(true);
     expect(schema.path('salespersonName').options.required).toBe(true);
   });
+
+  it('stores the customer identity snapshot even when the code is unassigned', () => {
+    expect(schema.path('customerCode').options.required).not.toBe(true);
+    expect(schema.path('customerCodeStatus')).toBeDefined();
+    expect(schema.path('customerName')).toBeDefined();
+    expect(schema.path('customerPhone')).toBeDefined();
+  });
 });

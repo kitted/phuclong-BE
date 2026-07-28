@@ -8,6 +8,20 @@ describe('Customers phone schema', () => {
     expect(schema.path('phone').options.required).not.toBe(true);
   });
 
+  it('allows unassigned codes and keeps active assigned codes unique', () => {
+    expect(schema.path('code').options.required).not.toBe(true);
+    expect(schema.path('codeStatus')).toBeDefined();
+    expect(schema.path('codeHistory')).toBeDefined();
+    expect(schema.indexes()).toContainEqual([
+      { code: 1 },
+      {
+        unique: true,
+        partialFilterExpression: { isDeleted: false, code: { $type: 'string' } },
+        background: true,
+      },
+    ]);
+  });
+
   it('stores normalized phones with non-unique search indexes', () => {
     expect(schema.path('phones')).toBeDefined();
     expect(schema.indexes()).toContainEqual([

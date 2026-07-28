@@ -84,7 +84,7 @@ export class EmployeeKpisService {
       const activationCodes = activationsByInvoice.get(String(invoice._id)) || [];
       const contributionValue = target.metric === EmployeeKpiMetric.INVOICE_COUNT ? 1 : target.metric === EmployeeKpiMetric.TOTAL_REVENUE ? Number(invoice.grandTotal || 0) : target.metric === EmployeeKpiMetric.PRODUCT_REVENUE ? this.itemContribution(invoice.items, target) : activationCodes.length;
       const customer: any = invoice.customerId;
-      return { id: String(invoice._id), code: invoice.code, date: invoice.date, customerCode: customer?.code || '', customerName: customer?.name || invoice.customer, customerPhone: customer?.phone || '', grandTotal: invoice.grandTotal, contributionValue, paymentStatus: invoice.paymentStatus, activationCodes };
+      return { id: String(invoice._id), code: invoice.code, date: invoice.date, customerCode: invoice.customerCode ?? customer?.code ?? '', customerName: invoice.customerName || customer?.name || invoice.customer, customerPhone: invoice.customerPhone ?? customer?.phone ?? '', grandTotal: invoice.grandTotal, contributionValue, paymentStatus: invoice.paymentStatus, activationCodes };
     }).filter((row) => row.contributionValue > 0);
     if (query.search?.trim()) { const search = query.search.trim().toLocaleLowerCase('vi'); rows = rows.filter((row) => [row.code, row.customerCode, row.customerName, row.customerPhone, ...row.activationCodes.map((item: any) => item.code)].some((value) => String(value || '').toLocaleLowerCase('vi').includes(search))); }
     const page = Math.max(1, Number(query.page) || 1); const limit = Math.min(100, Math.max(1, Number(query.limit) || 20)); const total = rows.length; const actualValue = await this.actual(kpi.employeeId, kpi.from, kpi.to, target);

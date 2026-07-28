@@ -7,6 +7,15 @@ export enum CustomerSegment { TEMPORARILY_INACTIVE = 'TEMPORARILY_INACTIVE', ACT
 export enum CustomerZaloStatus { CONNECTED = 'CONNECTED', NOT_CONNECTED = 'NOT_CONNECTED' }
 export enum CustomerInvoiceSendStatus { SENT = 'SENT', NOT_SENT = 'NOT_SENT' }
 export enum StoreLocationSource { GPS = 'GPS', MAP = 'MAP' }
+export enum CustomerCodeStatus { UNASSIGNED = 'UNASSIGNED', ASSIGNED = 'ASSIGNED' }
+
+export class CustomerCodeChange {
+  @prop() oldCode?: string;
+  @prop({ required: true }) newCode: string;
+  @prop({ ref: () => Users, required: true }) changedBy: Ref<Users>;
+  @prop({ required: true }) changedAt: Date;
+  @prop({ required: true }) reason: string;
+}
 
 export class StoreGeoPoint {
   @prop({ required: true, enum: ['Point'], default: 'Point' }) type: 'Point';
@@ -53,8 +62,11 @@ export class CustomerInteraction {
 @index({ phone: 1 })
 @index({ phones: 1 })
 @index({ 'storeLocation.geo': '2dsphere' })
+@index({ code: 1 }, { unique: true, partialFilterExpression: { isDeleted: false, code: { $type: 'string' } } })
 export class Customers extends BaseModel {
-  @prop({ required: true, unique: true }) code: string;
+  @prop() code?: string;
+  @prop({ enum: CustomerCodeStatus, default: CustomerCodeStatus.UNASSIGNED }) codeStatus: CustomerCodeStatus;
+  @prop({ type: () => [CustomerCodeChange], default: [] }) codeHistory: CustomerCodeChange[];
   @prop({ required: true }) name: string;
   @prop() phone?: string;
   @prop({ type: () => [String], default: [] }) phones: string[];
@@ -66,6 +78,7 @@ export class Customers extends BaseModel {
   @prop({ default: 0, min: 0 }) debt: number;
   @prop({ default: 0, min: 0 }) debtLimit: number;
   @prop() note?: string;
+  @prop() deleteReason?: string;
   @prop({ type: () => CustomerStoreLocation, _id: false }) storeLocation?: CustomerStoreLocation;
   @prop({ type: () => CustomerStorefrontImage, _id: false }) storefrontImage?: CustomerStorefrontImage;
   @prop({ type: () => [CustomerInteraction], default: [] }) interactions: CustomerInteraction[];

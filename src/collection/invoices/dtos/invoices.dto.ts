@@ -23,6 +23,12 @@ export class InvoicePreviewDto {
   @ApiPropertyOptional() @IsOptional() @IsString() voucherCode?: string;
   @ApiProperty({ type: [InvoiceItemDto] }) @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => InvoiceItemDto) items: InvoiceItemDto[];
 }
+export class NewInvoiceCustomerDto {
+  @ApiProperty() @IsString() name: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() phone?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() address?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
+}
 export class GiftSelectionItemDto {
   @ApiProperty() @IsMongoId() productId: string;
   @ApiProperty() @IsInt() @Min(1) qty: number;
@@ -44,6 +50,7 @@ export class ApplyGiftPromotionDto extends GiftPromotionPreviewDto {
   @ApiProperty({ type: [GiftSelectionDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => GiftSelectionDto) giftSelections: GiftSelectionDto[];
 }
 export class CreateInvoiceDto extends InvoicePreviewDto {
+  @ApiPropertyOptional({ type: NewInvoiceCustomerDto }) @IsOptional() @ValidateNested() @Type(() => NewInvoiceCustomerDto) newCustomer?: NewInvoiceCustomerDto;
   @ApiPropertyOptional() @IsOptional() @IsString() code?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() date?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() customer?: string;

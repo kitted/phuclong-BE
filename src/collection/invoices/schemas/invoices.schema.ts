@@ -2,7 +2,7 @@ import { index, prop, Ref } from '@typegoose/typegoose';
 import { BaseModel } from '../../../core/base.model';
 import { Products } from '../../products/schemas/products.schema';
 import { Trucks } from '../../trucks/schemas/trucks.schema';
-import { Customers } from '../../customers/schemas/customers.schema';
+import { CustomerCodeStatus, Customers } from '../../customers/schemas/customers.schema';
 import { Promotions, Vouchers } from '../../promotions/schemas/promotions.schema';
 import { Users } from '../../users/schemas/users.schema';
 
@@ -92,6 +92,10 @@ export class Invoices extends BaseModel {
   @prop({ required: true }) date: Date;
   @prop({ default: 'Khách lẻ' }) customer: string;
   @prop({ ref: () => Customers, default: null, index: true }) customerId?: Ref<Customers>;
+  @prop() customerCode?: string;
+  @prop({ enum: CustomerCodeStatus }) customerCodeStatus?: CustomerCodeStatus;
+  @prop() customerName?: string;
+  @prop() customerPhone?: string;
   @prop({ required: true, enum: ['warehouse', 'truck'] }) sourceType: string;
   @prop({ ref: () => Trucks }) truckId?: Ref<Trucks>;
   @prop() note?: string;

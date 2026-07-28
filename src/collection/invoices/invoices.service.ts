@@ -6,7 +6,7 @@ import { Invoices, InvoiceLineType, InvoicePaymentStatus, PaymentMethod } from '
 import { InvoiceCounters } from './schemas/invoice-counter.schema';
 import { Products } from '../products/schemas/products.schema';
 import { Trucks } from '../trucks/schemas/trucks.schema';
-import { Customers } from '../customers/schemas/customers.schema';
+import { CustomerCodeStatus, CustomerSegment, CustomerSource, Customers } from '../customers/schemas/customers.schema';
 import { Users, UserStatus } from '../users/schemas/users.schema';
 import { DiscountType, Promotions, PromotionScope, PromotionStatus, Vouchers, VoucherStatus } from '../promotions/schemas/promotions.schema';
 import { ApplyGiftPromotionDto, CreateInvoiceDto, GiftPromotionPreviewDto, InvoicePreviewDto } from './dtos/invoices.dto';
@@ -182,6 +182,8 @@ export class InvoicesService {
 
   async create(dto: CreateInvoiceDto, actor: Actor = {}): Promise<any> {
     const salespersonId = resolveInvoiceSalespersonId(dto.salespersonId, actor);
+    if (dto.customerId && dto.newCustomer) throw new BadRequestException('Không được gửi đồng thời customerId và newCustomer');
+    if (dto.newCustomer && !dto.newCustomer.name?.trim()) throw new BadRequestException('Tên khách hàng mới là bắt buộc');
     if (dto.sourceType === 'truck' && !dto.truckId) throw new BadRequestException('Phải chọn xe tải khi xuất từ xe');
     const date = dto.date ? new Date(dto.date) : new Date();
     if (Number.isNaN(date.getTime())) throw new BadRequestException('Ngày hóa đơn không hợp lệ');
@@ -193,8 +195,23 @@ export class InvoicesService {
       await session.withTransaction(async () => {
         const salesperson: any = await this.userModel.findOne({ _id: salespersonId, role: RoleEnum.STAFF, status: UserStatus.ACTIVE, isDeleted: false }).session(session);
         if (!salesperson) throw new BadRequestException('Nhân viên bán hàng không hoạt động hoặc không tồn tại');
-        const customer: any = dto.customerId ? await this.customerModel.findOne({ _id: dto.customerId, isDeleted: false }).session(session) : null;
+        let customer: any = dto.customerId ? await this.customerModel.findOne({ _id: dto.customerId, isDeleted: false }).session(session) : null;
         if (dto.customerId && !customer) throw new BadRequestException('Khách hàng không tồn tại');
+        if (dto.newCustomer) {
+          const phones = String(dto.newCustomer.phone || '').split(/[,;|/]+/).map((phone) => phone.replace(/\D/g, '')).filter(Boolean).map((phone) => phone.startsWith('0') ? phone : `0${phone}`).filter((phone, index, values) => values.indexOf(phone) === index);
+          customer = (await this.customerModel.create([{
+            name: dto.newCustomer.name.trim(),
+            phone: phones.join(', ') || undefined,
+            phones,
+            address: dto.newCustomer.address?.trim() || undefined,
+            note: dto.newCustomer.note?.trim() || undefined,
+            source: CustomerSource.NEW,
+            segment: CustomerSegment.NEW_CUSTOMER,
+            codeStatus: CustomerCodeStatus.UNASSIGNED,
+            debt: 0,
+            debtLimit: 0,
+          }], { session }))[0];
+        }
         const calculated = await this.calculate(dto, session);
         const directGiftLines = await this.directGiftLines(dto.gifts, session);
         const giftRequest = dto.promotionApplications?.[0];
@@ -252,6 +269,7 @@ export class InvoicesService {
         const paymentDueDate = dto.paymentDueDate ? new Date(dto.paymentDueDate) : dto.paymentTermDays ? new Date(date.getTime() + dto.paymentTermDays * 86400000) : undefined;
         const invoice: any = (await this.model.create([{
           code, giftCode, date, customer: customer?.name || dto.customer || 'Khách lẻ', customerId: customer?._id,
+          customerCode: customer?.code, customerCodeStatus: customer?.codeStatus, customerName: customer?.name, customerPhone: customer?.phone,
           sourceType: dto.sourceType, truckId: dto.truckId, note: dto.note, items: inventoryLines,
           subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, totalAmount: calculated.grandTotal,
           payments: split.invoicePayments, paidAmount, receivedAmount, existingDebtPaidAmount, debtAmount, initialPaidAmount: paidAmount, initialDebtAmount: debtAmount, customerDebtBefore: customer ? Number(customer.debt || 0) : 0, customerDebtAfter, paymentStatus, paymentDueDate, paymentTermDays: dto.paymentTermDays, debtLimitOverridden: Boolean(dto.allowDebtLimitOverride), debtOverrideReason: dto.debtOverrideReason?.trim(),
@@ -299,7 +317,7 @@ export class InvoicesService {
           }
         }
         await this.movements.recordMany(movementInputs.map((movement) => ({ ...movement, referenceType: 'INVOICE', referenceId: String(invoice._id), referenceCode: code })), session);
-        response = { data: { id: String(invoice._id), code, giftCode, items: inventoryLines, subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, paidAmount, receivedAmount, existingDebtPaidAmount, debtAmount, customerDebtBefore: customer ? Number(customer.debt || 0) : 0, customerDebtAfter, debtPaymentCode, paymentStatus, promotionActivations: activation ? [{ id: String(activation._id), code: activation.code, status: activation.status }] : [] } };
+        response = { data: { id: String(invoice._id), code, giftCode, customer: customer ? { id: String(customer._id), code: customer.code || null, codeStatus: customer.codeStatus || CustomerCodeStatus.UNASSIGNED, name: customer.name } : null, items: inventoryLines, subtotal: calculated.subtotal, discountAmount: calculated.discountAmount, grandTotal: calculated.grandTotal, paidAmount, receivedAmount, existingDebtPaidAmount, debtAmount, customerDebtBefore: customer ? Number(customer.debt || 0) : 0, customerDebtAfter, debtPaymentCode, paymentStatus, promotionActivations: activation ? [{ id: String(activation._id), code: activation.code, status: activation.status }] : [] } };
       });
       return response;
     } finally { await session.endSession(); }
@@ -318,7 +336,7 @@ export class InvoicesService {
         this.customerModel.find({ isDeleted: false, $or: [{ code: regex }, { name: regex }, { phone: regex }] }).select('_id').limit(500).lean(),
         this.activationModel.find({ isDeleted: false, code: regex }).select('invoiceId').limit(500).lean(),
       ]);
-      filter.$or = [{ code: regex }, { customer: regex }, { customerId: { $in: customers.map((item: any) => item._id) } }, { _id: { $in: activations.map((item: any) => item.invoiceId) } }, { 'promotionApplications.activationCode': regex }];
+      filter.$or = [{ code: regex }, { customer: regex }, { customerCode: regex }, { customerName: regex }, { customerPhone: regex }, { customerId: { $in: customers.map((item: any) => item._id) } }, { _id: { $in: activations.map((item: any) => item.invoiceId) } }, { 'promotionApplications.activationCode': regex }];
     }
     return filter;
   }
