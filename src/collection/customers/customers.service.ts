@@ -1,9 +1,9 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ReturnModelType } from '@typegoose/typegoose';
 import { getConnectionToken, InjectModel } from 'nestjs-typegoose';
 import { Connection } from 'mongoose';
 import { CustomerCounters, Customers } from './schemas/customers.schema';
-import { CreateCustomerDto, CreateInteractionDto, CustomerDebtHistoryQueryDto, CustomerQueryDto, UpdateCustomerDto } from './dtos/customers.dto';
+import { CreateCustomerDto, CreateInteractionDto, CustomerDebtHistoryQueryDto, CustomerQueryDto, UpdateCustomerDto, UpdateCustomerStoreProfileDto } from './dtos/customers.dto';
 import { Invoices } from '../invoices/schemas/invoices.schema';
 import { Vouchers } from '../promotions/schemas/promotions.schema';
 import * as ExcelJS from 'exceljs';
@@ -11,7 +11,11 @@ import { excelBoolean, excelNumber, excelValue, normalizeExcelRow } from '../../
 import { CustomerSegment, CustomerSource } from './schemas/customers.schema';
 import { CustomerDebtLedger, DebtLedgerDirection, DebtLedgerType } from '../debt-payments/schemas/customer-debt-ledger.schema';
 import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
-import { Users } from '../users/schemas/users.schema';
+import { Users, UserStatus } from '../users/schemas/users.schema';
+import { createHash } from 'crypto';
+import { ImportCustomerInteractionRowDto } from './dtos/customers.dto';
+import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
+import { RoleEnum } from '../users/interfaces/role.enum';
 
 export function normalizePhones(value?: unknown): string[] {
   return String(value ?? '').split(/[,;|/]+/).map((phone) => phone.replace(/\D/g, '')).filter(Boolean).map((phone) => phone.startsWith('0') ? phone : `0${phone}`).filter((phone, index, values) => values.indexOf(phone) === index);
@@ -23,8 +27,26 @@ function aliasKey(value: unknown) { return String(value ?? '').normalize('NFD').
 const SOURCE_ALIASES: Record<string, CustomerSource> = { LEAD: CustomerSource.LEAD, LEGACY: CustomerSource.LEGACY, 'KHACH CU': CustomerSource.LEGACY, NEW: CustomerSource.NEW, 'KHACH MOI': CustomerSource.NEW };
 const SEGMENT_ALIASES: Record<string, CustomerSegment> = { TEMPORARILY_INACTIVE: CustomerSegment.TEMPORARILY_INACTIVE, 'NGU QUEN 31-89 NGAY': CustomerSegment.TEMPORARILY_INACTIVE, ACTIVE: CustomerSegment.ACTIVE, 'DANG HOAT DONG': CustomerSegment.ACTIVE, HIGHLY_ACTIVE: CustomerSegment.HIGHLY_ACTIVE, 'THUONG XUYEN': CustomerSegment.HIGHLY_ACTIVE, STOPPED_BUYING: CustomerSegment.STOPPED_BUYING, '90-179 NGAY CHUA PS': CustomerSegment.STOPPED_BUYING, CHURNED: CustomerSegment.CHURNED, 'KHACH CHET >=180 NGAY': CustomerSegment.CHURNED, NEW_CUSTOMER: CustomerSegment.NEW_CUSTOMER, 'CHUA PHAT SINH DON': CustomerSegment.NEW_CUSTOMER, VIP: CustomerSegment.HIGHLY_ACTIVE, 'THAN THIET': CustomerSegment.HIGHLY_ACTIVE, 'TIEM NANG': CustomerSegment.ACTIVE, 'DAI LY': CustomerSegment.ACTIVE, THUONG: CustomerSegment.ACTIVE };
 
+export function buildCustomerInteractionImportKey(row: ImportCustomerInteractionRowDto, code: string, occurredAt: Date, phone: string) {
+  return createHash('sha256').update(JSON.stringify([
+    row.rowNumber || 0, code, occurredAt.toISOString(), row.zaloStatus || '',
+    row.invoiceStatus || '', row.interaction?.trim() || '', phone, row.note?.trim() || '',
+  ])).digest('hex');
+}
+
+export function customerStoreProfileFlags(customer: any) {
+  return {
+    hasStoreLocation:
+      Number.isFinite(customer?.storeLocation?.latitude) &&
+      Number.isFinite(customer?.storeLocation?.longitude),
+    hasStorefrontImage: Boolean(customer?.storefrontImage?.url),
+  };
+}
+
 @Injectable()
 export class CustomersService {
+  private readonly logger = new Logger(CustomersService.name);
+
   constructor(
     @InjectModel(Customers) private readonly model: ReturnModelType<typeof Customers>,
     @InjectModel(CustomerCounters) private readonly counterModel: ReturnModelType<typeof CustomerCounters>,
@@ -90,11 +112,11 @@ export class CustomersService {
     if (expressions.length === 1) filter.$expr = expressions[0];
     else if (expressions.length > 1) filter.$expr = { $and: expressions };
     const [data, totalItems] = await Promise.all([
-      this.model.find(filter).select('code name phone phones email address source segment zaloConnected debt debtLimit note createdAt updatedAt').sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      this.model.find(filter).select('code name phone phones email address source segment zaloConnected debt debtLimit note createdAt updatedAt storeLocation.latitude storeLocation.longitude storefrontImage.url').sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
       this.model.countDocuments(filter),
     ]);
     return {
-      data: data.map((customer: any) => ({ ...customer, id: String(customer._id), sourceLabel: SOURCE_LABELS[customer.source], segmentLabel: SEGMENT_LABELS[customer.segment], availableDebtLimit: customer.debtLimit > 0 ? Math.max(0, customer.debtLimit - (customer.debt || 0)) : 0, debtWarning: (customer.debt || 0) > 0 && (customer.debt || 0) >= (customer.debtLimit || 0) })),
+      data: data.map((customer: any) => ({ ...customer, id: String(customer._id), ...customerStoreProfileFlags(customer), sourceLabel: SOURCE_LABELS[customer.source], segmentLabel: SEGMENT_LABELS[customer.segment], availableDebtLimit: customer.debtLimit > 0 ? Math.max(0, customer.debtLimit - (customer.debt || 0)) : 0, debtWarning: (customer.debt || 0) > 0 && (customer.debt || 0) >= (customer.debtLimit || 0) })),
       meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) },
     };
   }
@@ -139,6 +161,198 @@ export class CustomersService {
     );
     if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
     return { data: customer.interactions[customer.interactions.length - 1] };
+  }
+
+  async updateStoreProfile(id: string, dto: UpdateCustomerStoreProfileDto, actorId?: string) {
+    await this.assertStoreProfileActor(actorId);
+    const latitude = Number(dto.latitude); const longitude = Number(dto.longitude);
+    const accuracy = dto.accuracy === undefined ? undefined : Number(dto.accuracy);
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) throw new BadRequestException('Vĩ độ phải nằm trong khoảng -90 đến 90');
+    if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) throw new BadRequestException('Kinh độ phải nằm trong khoảng -180 đến 180');
+    if (accuracy !== undefined && (!Number.isFinite(accuracy) || accuracy < 0)) throw new BadRequestException('Độ chính xác GPS không hợp lệ');
+    if (!['GPS', 'MAP'].includes(dto.source)) throw new BadRequestException('Nguồn vị trí phải là GPS hoặc MAP');
+    if (dto.note && dto.note.length > 500) throw new BadRequestException('Ghi chú vị trí tối đa 500 ký tự');
+    const capturedAt = dto.capturedAt ? new Date(dto.capturedAt) : new Date();
+    if (Number.isNaN(capturedAt.getTime())) throw new BadRequestException('Thời gian ghi nhận vị trí không hợp lệ');
+    const storeLocation = {
+      latitude, longitude, accuracy, source: dto.source,
+      note: dto.note?.trim() || undefined, capturedAt, capturedBy: actorId || undefined,
+      geo: { type: 'Point', coordinates: [longitude, latitude] },
+    };
+    const customer = await this.model.findOneAndUpdate({ _id: id, isDeleted: false }, { $set: { storeLocation } }, { new: true });
+    if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
+    return { data: customer };
+  }
+
+  private async assertStoreProfileActor(actorId?: string) {
+    if (!actorId) throw new ForbiddenException('Không xác định được người thực hiện');
+    const actor = await this.userModel.exists({
+      _id: actorId,
+      isDeleted: false,
+      status: UserStatus.ACTIVE,
+      role: { $in: [RoleEnum.ADMIN, RoleEnum.STAFF] },
+    });
+    if (!actor) throw new ForbiddenException('Tài khoản không còn hoạt động hoặc không có quyền thao tác');
+  }
+
+  async deleteStoreProfile(id: string, actorId?: string) {
+    await this.assertStoreProfileActor(actorId);
+    const customer = await this.model.findOneAndUpdate(
+      { _id: id, isDeleted: false },
+      { $unset: { storeLocation: 1 } },
+      { new: true },
+    );
+    if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
+    return { data: customer };
+  }
+
+  private configureCloudinary() {
+    const cloud_name = process.env.CLOUDINARY_CLOUD_NAME; const api_key = process.env.CLOUDINARY_API_KEY; const api_secret = process.env.CLOUDINARY_API_SECRET;
+    if (!cloud_name || !api_key || !api_secret) throw new BadRequestException('Cloudinary chưa được cấu hình trên backend');
+    cloudinary.config({ cloud_name, api_key, api_secret, secure: true });
+  }
+
+  private uploadStorefrontBuffer(buffer: Buffer, folder: string): Promise<UploadApiResponse> {
+    return new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream({
+        folder, resource_type: 'image', overwrite: false,
+        transformation: [{ width: 1600, height: 1600, crop: 'limit', quality: 'auto', fetch_format: 'auto' }],
+      }, (error, result) => error || !result ? reject(error || new Error('Cloudinary không trả kết quả upload')) : resolve(result));
+      stream.end(buffer);
+    });
+  }
+
+  async uploadStorefrontImage(id: string, file: any, actorId?: string) {
+    await this.assertStoreProfileActor(actorId);
+    if (!file?.buffer) throw new BadRequestException('Vui lòng chọn ảnh bảng hiệu');
+    if (file.size > 5 * 1024 * 1024) throw new BadRequestException('Ảnh bảng hiệu không được vượt quá 5 MB');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) throw new BadRequestException('Chỉ hỗ trợ ảnh JPEG, PNG hoặc WebP');
+    const customer: any = await this.model.findOne({ _id: id, isDeleted: false }).select('code storefrontImage').lean();
+    if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
+    this.configureCloudinary();
+    const uploaded = await this.uploadStorefrontBuffer(file.buffer, `customers/${customer.code}/storefront`);
+    const storefrontImage = {
+      url: uploaded.secure_url, publicId: uploaded.public_id, width: uploaded.width,
+      height: uploaded.height, format: uploaded.format, bytes: uploaded.bytes,
+      uploadedAt: new Date(), uploadedBy: actorId || undefined,
+    };
+    let updated: any;
+    try {
+      updated = await this.model.findOneAndUpdate({ _id: id, isDeleted: false }, { $set: { storefrontImage } }, { new: true });
+      if (!updated) throw new NotFoundException('Không tìm thấy khách hàng');
+    } catch (error) {
+      await cloudinary.uploader.destroy(uploaded.public_id, { resource_type: 'image' }).catch(() => undefined);
+      throw error;
+    }
+    const oldPublicId = customer.storefrontImage?.publicId;
+    if (oldPublicId && oldPublicId !== uploaded.public_id) await cloudinary.uploader.destroy(oldPublicId, { resource_type: 'image' }).catch(() => undefined);
+    return { data: updated };
+  }
+
+  async deleteStorefrontImage(id: string, actorId?: string) {
+    await this.assertStoreProfileActor(actorId);
+    const current: any = await this.model.findOne({ _id: id, isDeleted: false }).select('storefrontImage').lean();
+    if (!current) throw new NotFoundException('Không tìm thấy khách hàng');
+    const customer = await this.model.findOneAndUpdate(
+      { _id: id, isDeleted: false },
+      { $unset: { storefrontImage: 1 } },
+      { new: true },
+    );
+    if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
+    const publicId = current.storefrontImage?.publicId;
+    if (publicId) {
+      try {
+        this.configureCloudinary();
+        await cloudinary.uploader.destroy(publicId, { resource_type: 'image' });
+      } catch (error) {
+        this.logger.warn(`Không thể cleanup ảnh Cloudinary ${publicId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return { data: customer };
+  }
+
+  async importInteractions(rows: ImportCustomerInteractionRowDto[], actorId?: string) {
+    if (!Array.isArray(rows) || !rows.length) throw new BadRequestException('File import không có dữ liệu tương tác');
+    if (rows.length > 10000) throw new BadRequestException('Mỗi lần chỉ được import tối đa 10.000 dòng');
+    let imported = 0; let zaloUpdated = 0; let duplicatesSkipped = 0;
+    const errors: Array<{ row: number; message: string; data: ImportCustomerInteractionRowDto }> = [];
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index]; const rowNumber = Number(row.rowNumber) || index + 2;
+      try {
+        const customerCode = String(row.customerCode || '').trim().toUpperCase().replace(/\s+/g, '');
+        if (!customerCode) throw new Error('Thiếu mã khách hàng');
+        if (row.zaloStatus && !['CONNECTED', 'NOT_CONNECTED'].includes(row.zaloStatus)) throw new Error('Tình trạng Zalo không hợp lệ');
+        if (row.invoiceStatus && !['SENT', 'NOT_SENT'].includes(row.invoiceStatus)) throw new Error('Tình trạng gửi hóa đơn không hợp lệ');
+        if (!row.zaloStatus && !row.invoiceStatus && !row.interaction?.trim() && !row.note?.trim()) throw new Error('Dòng chưa có nội dung hoặc trạng thái tương tác');
+        const occurredAt = new Date(row.occurredAt);
+        if (Number.isNaN(occurredAt.getTime())) throw new Error('Ngày tương tác không hợp lệ');
+        const phone = normalizePhones(row.phone).join(', ');
+        const importKey = buildCustomerInteractionImportKey(row, customerCode, occurredAt, phone);
+        const customer: any = await this.model.findOne({ code: customerCode, isDeleted: false }).select('_id zaloConnected interactions.importKey').lean();
+        if (!customer) throw new Error(`Không tìm thấy khách hàng ${customerCode}`);
+        if ((customer.interactions || []).some((item) => item.importKey === importKey)) { imported++; duplicatesSkipped++; continue; }
+        const desiredZalo = row.zaloStatus ? row.zaloStatus === 'CONNECTED' : undefined;
+        const interaction = {
+          at: occurredAt, occurredAt, channel: 'IMPORT',
+          action: row.interaction?.trim() || 'Cập nhật tình hình tương tác',
+          result: row.note?.trim() || undefined,
+          zaloStatus: row.zaloStatus, invoiceStatus: row.invoiceStatus,
+          interaction: row.interaction?.trim() || undefined, phone: phone || undefined,
+          note: row.note?.trim() || undefined, createdBy: actorId, importKey,
+        };
+        const update: any = { $push: { interactions: interaction } };
+        if (desiredZalo !== undefined) update.$set = { zaloConnected: desiredZalo };
+        const updated = await this.model.findOneAndUpdate(
+          { _id: customer._id, isDeleted: false, 'interactions.importKey': { $ne: importKey } },
+          update,
+          { new: true },
+        );
+        if (!updated) { imported++; duplicatesSkipped++; continue; }
+        imported++;
+        if (desiredZalo !== undefined && Boolean(customer.zaloConnected) !== desiredZalo) zaloUpdated++;
+      } catch (error) {
+        errors.push({ row: rowNumber, message: error instanceof Error ? error.message : 'Không thể import tương tác', data: row });
+      }
+    }
+    return { data: { totalRows: rows.length, imported, zaloUpdated, failed: errors.length, duplicatesSkipped, errors } };
+  }
+
+  async exportInteractions() {
+    const customers: any[] = await this.model.find({ isDeleted: false, 'interactions.0': { $exists: true } }).select('code name phone interactions').sort({ code: 1 }).lean();
+    const rows = customers.flatMap((customer) => (customer.interactions || []).map((interaction) => ({
+      customerCode: customer.code,
+      customerName: customer.name,
+      zaloStatus: interaction.zaloStatus,
+      invoiceStatus: interaction.invoiceStatus,
+      interaction: interaction.interaction || interaction.action || '',
+      phone: interaction.phone || customer.phone || '',
+      note: interaction.note || interaction.result || '',
+      occurredAt: interaction.occurredAt || interaction.at,
+    }))).sort((left, right) => +new Date(right.occurredAt) - +new Date(left.occurredAt));
+    const workbook = new ExcelJS.Workbook(); const sheet = workbook.addWorksheet('Tương tác khách hàng');
+    sheet.columns = [
+      { header: 'MÃ KHÁCH HÀNG', key: 'customerCode', width: 18 },
+      { header: 'TÊN KHÁCH HÀNG', key: 'customerName', width: 30 },
+      { header: 'TÌNH TRẠNG ZALO', key: 'zaloStatus', width: 22 },
+      { header: 'TÌNH TRẠNG HOÁ ĐƠN', key: 'invoiceStatus', width: 22 },
+      { header: 'TƯƠNG TÁC', key: 'interaction', width: 34 },
+      { header: '#', key: 'separator', width: 5 },
+      { header: 'SỐ ĐIỆN THOẠI', key: 'phone', width: 20 },
+      { header: 'NOTE', key: 'note', width: 34 },
+      { header: 'NGÀY', key: 'occurredAt', width: 16 },
+    ];
+    for (const row of rows) sheet.addRow({
+      ...row,
+      zaloStatus: row.zaloStatus === 'CONNECTED' ? 'ĐÃ KẾT BẠN' : row.zaloStatus === 'NOT_CONNECTED' ? 'CHƯA KẾT BẠN' : '',
+      invoiceStatus: row.invoiceStatus === 'SENT' ? 'ĐÃ GỬI' : row.invoiceStatus === 'NOT_SENT' ? 'KHÔNG GỬI' : '',
+      occurredAt: row.occurredAt ? new Date(row.occurredAt) : null,
+    });
+    sheet.getRow(1).font = { bold: true }; sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = { from: 'A1', to: 'I1' };
+    sheet.getColumn('phone').numFmt = '@'; sheet.getColumn('occurredAt').numFmt = 'dd/mm/yyyy';
+    (sheet as any).dataValidations.add('C2:C10001', { type: 'list', allowBlank: true, formulae: ['"ĐÃ KẾT BẠN,CHƯA KẾT BẠN"'] });
+    (sheet as any).dataValidations.add('D2:D10001', { type: 'list', allowBlank: true, formulae: ['"ĐÃ GỬI,KHÔNG GỬI"'] });
+    return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
   async debtHistory(customerId: string, query: CustomerDebtHistoryQueryDto) {

@@ -15,4 +15,28 @@ describe('Customers phone schema', () => {
       { background: true },
     ]);
   });
+
+  it('stores imported interaction snapshots and idempotency key', () => {
+    expect(schema.path('interactions').schema.path('zaloStatus')).toBeDefined();
+    expect(schema.path('interactions').schema.path('invoiceStatus')).toBeDefined();
+    expect(schema.path('interactions').schema.path('occurredAt')).toBeDefined();
+    expect(schema.path('interactions').schema.path('importKey')).toBeDefined();
+  });
+
+  it('stores storefront location as GeoJSON and indexes it', () => {
+    expect(schema.path('storeLocation.latitude')).toBeDefined();
+    expect(schema.path('storeLocation.longitude')).toBeDefined();
+    expect(schema.path('storeLocation.geo.type')).toBeDefined();
+    expect(schema.path('storeLocation.geo.coordinates')).toBeDefined();
+    expect(schema.indexes()).toContainEqual([
+      { 'storeLocation.geo': '2dsphere' },
+      { background: true },
+    ]);
+  });
+
+  it('stores the Cloudinary storefront image snapshot', () => {
+    expect(schema.path('storefrontImage.url')).toBeDefined();
+    expect(schema.path('storefrontImage.publicId')).toBeDefined();
+    expect(schema.path('storefrontImage.uploadedBy')).toBeDefined();
+  });
 });

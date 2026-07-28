@@ -1,7 +1,8 @@
-import { Body, Get, Param, Patch, Post, Query, Req, Res, StreamableFile } from '@nestjs/common';
+import { BadRequestException, Body, Delete, Get, Param, Patch, Post, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { CustomersService } from '../../../collection/customers/customers.service';
-import { CreateCustomerDto, CreateInteractionDto, CustomerDebtHistoryQueryDto, CustomerQueryDto, ImportCustomersDto, UpdateCustomerDto } from '../../../collection/customers/dtos/customers.dto';
+import { CreateCustomerDto, CreateInteractionDto, CustomerDebtHistoryQueryDto, CustomerQueryDto, ImportCustomerInteractionsDto, ImportCustomersDto, UpdateCustomerDto, UpdateCustomerStoreProfileDto } from '../../../collection/customers/dtos/customers.dto';
 import { WarehouseController } from '../decorators/warehouse';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
@@ -32,6 +33,54 @@ export class CustomersController {
       'Content-Disposition': `attachment; filename="customers-${new Date().toISOString().slice(0, 10)}.xlsx"`,
     });
     return new StreamableFile(file);
+  }
+
+  @Post('interactions/import') @AdminOnly() @ApiOperation({ summary: 'Import customer interaction history by customer code' })
+  importInteractions(@Body() dto: ImportCustomerInteractionsDto, @Req() request: AuthRequest) {
+    const user: any = request.user; const doc = user?._doc || user;
+    return this.service.importInteractions(dto.rows, String(doc?.id || doc?._id || ''));
+  }
+
+  @Get('interactions/export') @AdminOnly() @ApiOperation({ summary: 'Export customer interaction history to XLSX' })
+  @ApiProduces('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  async exportInteractions(@Res({ passthrough: true }) response: Response) {
+    const file = await this.service.exportInteractions();
+    response.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="customer-interactions-${new Date().toISOString().slice(0, 10)}.xlsx"`,
+    });
+    return new StreamableFile(file);
+  }
+
+  @Patch(':id/store-profile') @ApiOperation({ summary: 'Update customer storefront location' })
+  updateStoreProfile(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateCustomerStoreProfileDto, @Req() request: AuthRequest) {
+    const user: any = request.user; const doc = user?._doc || user;
+    return this.service.updateStoreProfile(String(id), dto, String(doc?.id || doc?._id || ''));
+  }
+
+  @Delete(':id/store-profile') @ApiOperation({ summary: 'Delete customer storefront location' })
+  deleteStoreProfile(@Param('id', ParseIdPipe) id: ID, @Req() request: AuthRequest) {
+    const user: any = request.user; const doc = user?._doc || user;
+    return this.service.deleteStoreProfile(String(id), String(doc?.id || doc?._id || ''));
+  }
+
+  @Post(':id/storefront-image') @ApiOperation({ summary: 'Upload or replace customer storefront image' })
+  @UseInterceptors(FileInterceptor('file', {
+    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+    fileFilter: (_request, file, callback) => {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) return callback(new BadRequestException('Chỉ hỗ trợ ảnh JPEG, PNG hoặc WebP'), false);
+      callback(null, true);
+    },
+  }))
+  uploadStorefrontImage(@Param('id', ParseIdPipe) id: ID, @UploadedFile() file: any, @Req() request: AuthRequest) {
+    const user: any = request.user; const doc = user?._doc || user;
+    return this.service.uploadStorefrontImage(String(id), file, String(doc?.id || doc?._id || ''));
+  }
+
+  @Delete(':id/storefront-image') @ApiOperation({ summary: 'Delete customer storefront image' })
+  deleteStorefrontImage(@Param('id', ParseIdPipe) id: ID, @Req() request: AuthRequest) {
+    const user: any = request.user; const doc = user?._doc || user;
+    return this.service.deleteStorefrontImage(String(id), String(doc?.id || doc?._id || ''));
   }
 
   @Get(':id/promotion-activations') @ApiOperation({ summary: 'Get promotion activations of customer' })
