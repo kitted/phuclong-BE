@@ -1,6 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from 'nestjs-typegoose';
-import { calculateInvoiceDebtAllocation, InvoicesService, resolveInvoiceSalespersonId } from './invoices.service';
+import { calculateInvoiceDebtAllocation, canViewAllCompanyInvoices, InvoicesService, resolveInvoiceSalespersonId } from './invoices.service';
 import { Invoices } from './schemas/invoices.schema';
 import { InvoiceCounters } from './schemas/invoice-counter.schema';
 import { Products } from '../products/schemas/products.schema';
@@ -26,6 +26,17 @@ describe('invoice salesperson authorization', () => {
   it('rejects another salesperson for staff', () => expect(() => resolveInvoiceSalespersonId(otherId, { id: staffId, role: RoleEnum.STAFF })).toThrow('Nhân viên chỉ được tạo hóa đơn'));
   it('requires salesperson for admin', () => expect(() => resolveInvoiceSalespersonId(undefined, { role: RoleEnum.ADMIN })).toThrow('Vui lòng chọn nhân viên bán hàng'));
   it('accepts the selected salesperson for admin', () => expect(resolveInvoiceSalespersonId(otherId, { role: RoleEnum.ADMIN })).toBe(otherId));
+});
+
+describe('invoice read visibility', () => {
+  it('always grants company-wide visibility to admin', () => {
+    expect(canViewAllCompanyInvoices({ role: RoleEnum.ADMIN, canViewAllInvoices: false })).toBe(true);
+  });
+
+  it('only grants company-wide visibility to opted-in staff', () => {
+    expect(canViewAllCompanyInvoices({ role: RoleEnum.STAFF, canViewAllInvoices: true })).toBe(true);
+    expect(canViewAllCompanyInvoices({ role: RoleEnum.STAFF, canViewAllInvoices: false })).toBe(false);
+  });
 });
 
 describe('invoice payment with old debt allocation', () => {

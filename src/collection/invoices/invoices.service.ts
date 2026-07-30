@@ -45,6 +45,10 @@ export function calculateInvoiceDebtAllocation(receivedAmount: number, grandTota
   return { paidAmount, existingDebtPaidAmount, debtAmount, customerDebtAfter: customerDebtBefore + debtAmount - existingDebtPaidAmount };
 }
 
+export function canViewAllCompanyInvoices(user: { role?: RoleEnum; canViewAllInvoices?: boolean }) {
+  return user.role === RoleEnum.ADMIN || (user.role === RoleEnum.STAFF && user.canViewAllInvoices === true);
+}
+
 @Injectable()
 export class InvoicesService {
   constructor(
@@ -412,12 +416,12 @@ export class InvoicesService {
 
   private async resolveInvoiceReadScope(actor: Actor) {
     if (!actor.id || !Types.ObjectId.isValid(actor.id)) throw new ForbiddenException('Không xác định được tài khoản hiện tại');
-    const current: any = await this.userModel.findOne({ _id: actor.id, isDeleted: false, status: UserStatus.ACTIVE }).select('_id role canViewAllInvoices').lean();
+    const current: any = await this.userModel.findOne({ _id: actor.id, isDeleted: false, status: { $ne: UserStatus.INACTIVE } }).select('_id role canViewAllInvoices').lean();
     if (!current) throw new ForbiddenException('Tài khoản không còn hoạt động');
     return {
       id: String(current._id),
       role: current.role as RoleEnum,
-      canViewAll: current.role === RoleEnum.ADMIN || current.canViewAllInvoices === true,
+      canViewAll: canViewAllCompanyInvoices(current),
     };
   }
 
@@ -449,8 +453,37 @@ export class InvoicesService {
     return { data: rows.map((row: any) => ({ ...row, id: String(row._id), activationCodes: byInvoice.get(String(row._id)) || [] })), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
-  timeline(query: InvoiceQueryDto = {}, actor: Actor = {}): Promise<any> {
-    return this.findAll(query, actor);
+  async timeline(query: InvoiceQueryDto = {}, actor: Actor = {}): Promise<any> {
+    const access = await this.resolveInvoiceReadScope(actor);
+    const page = Math.max(1, Number(query.page) || 1); const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
+    const invoiceFilter: any = { isDeleted: false };
+    const receiptFilter: any = { isDeleted: false };
+    const salespersonId = access.canViewAll ? query.salespersonId : access.id;
+    if (salespersonId) { invoiceFilter.salespersonId = salespersonId; receiptFilter.collectorId = salespersonId; }
+    if (query.paymentStatus) { invoiceFilter.paymentStatus = query.paymentStatus; receiptFilter._id = { $exists: false }; }
+    if (query.from || query.to) {
+      invoiceFilter.date = {}; receiptFilter.date = {};
+      if (query.from) { invoiceFilter.date.$gte = vietnamDateBoundary(query.from, false); receiptFilter.date.$gte = invoiceFilter.date.$gte; }
+      if (query.to) { invoiceFilter.date.$lte = vietnamDateBoundary(query.to, true); receiptFilter.date.$lte = invoiceFilter.date.$lte; }
+    }
+    if (query.search?.trim()) {
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); const regex = { $regex: escaped, $options: 'i' };
+      invoiceFilter.$or = [{ code: regex }, { customer: regex }, { customerCode: regex }, { customerName: regex }, { customerPhone: regex }, { salespersonCode: regex }, { salespersonName: regex }, { 'promotionApplications.activationCode': regex }];
+      receiptFilter.$or = [{ code: regex }, { customerCode: regex }, { customerName: regex }, { customerPhone: regex }, { collectorCode: regex }, { collectorName: regex }, { 'allocations.invoiceCode': regex }];
+    }
+    const [invoices, receipts] = await Promise.all([
+      this.model.find(invoiceFilter).select('-__v').populate('customerId', 'code name phone phones address').populate('salespersonId', 'employeeCode fullName').lean(),
+      this.debtPaymentModel.find(receiptFilter).select('-__v').lean(),
+    ]);
+    const documents = [
+      ...invoices.map((invoice: any) => ({ ...invoice, id: String(invoice._id), documentType: 'INVOICE' })),
+      ...receipts.map((receipt: any) => ({ ...receipt, id: String(receipt._id), documentType: 'DEBT_PAYMENT' })),
+    ].sort((left: any, right: any) => {
+      const dateDifference = new Date(right.date || right.createdAt).getTime() - new Date(left.date || left.createdAt).getTime();
+      return dateDifference || String(right._id).localeCompare(String(left._id));
+    });
+    const total = documents.length;
+    return { data: documents.slice((page - 1) * limit, page * limit), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
   async summary(query: InvoiceQueryDto, actor: Actor = {}): Promise<any> {
