@@ -1,6 +1,9 @@
 import { ObjectId } from 'bson';
+import { Test } from '@nestjs/testing';
+import { getConnectionToken, getModelToken } from 'nestjs-typegoose';
 import { BackupLockService } from './backup-lock.service';
 import { BackupsService } from './backups.service';
+import { Users } from '../users/schemas/users.schema';
 
 describe('encrypted backup envelope', () => {
   const previousEncryption = process.env.BACKUP_ENCRYPTION_KEY;
@@ -27,5 +30,19 @@ describe('encrypted backup envelope', () => {
     const file: Buffer = service.encode({ value: 1 });
     file[file.length - 1] ^= 1;
     expect(() => service.decode(file)).toThrow('checksum');
+  });
+});
+
+describe('BackupsService dependency injection', () => {
+  it('uses the Typegoose connection token registered by this application', async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        BackupsService,
+        BackupLockService,
+        { provide: getConnectionToken(), useValue: { db: {} } },
+        { provide: getModelToken(Users.name), useValue: {} },
+      ],
+    }).compile();
+    expect(module.get(BackupsService)).toBeDefined();
   });
 });

@@ -1,7 +1,6 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from 'nestjs-typegoose';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { getConnectionToken, InjectModel } from 'nestjs-typegoose';
 import { ReturnModelType } from '@typegoose/typegoose';
-import { getConnectionToken, InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import { EJSON } from 'bson';
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
@@ -22,7 +21,7 @@ export class BackupsService {
   private readonly restoreTokens = new Map<string, StoredBackup>();
   private readonly jobs = new Map<string, RestoreJob>();
   constructor(
-    @InjectConnection() private readonly connection: Connection,
+    @Inject(getConnectionToken()) private readonly connection: Connection,
     @InjectModel(Users) private readonly users: ReturnModelType<typeof Users>,
     private readonly lock: BackupLockService,
   ) {}
