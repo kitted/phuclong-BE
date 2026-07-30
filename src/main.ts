@@ -9,7 +9,7 @@ async function bootstrap() {
   });
   app.use(json({ limit: '20mb' }));
   app.use(urlencoded({ extended: true, limit: '20mb' }));
-  app.enableCors();
+  app.enableCors({ exposedHeaders: ['Content-Disposition'] });
 
   const config = new DocumentBuilder()
     .setTitle('BE PHUCLONG App')

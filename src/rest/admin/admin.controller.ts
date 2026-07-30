@@ -34,6 +34,7 @@ import { DebtPaymentsController } from './controllers/debt-payments.controller';
 import { AuditLogsController } from './controllers/audit-logs.controller';
 import { ReportsController } from './controllers/reports.controller';
 import { NotificationsController } from './controllers/notifications.controller';
+import { BackupsController } from './controllers/backups.controller';
 
 @Module({
   imports: [
@@ -73,6 +74,7 @@ import { NotificationsController } from './controllers/notifications.controller'
     AuditLogsController,
     ReportsController,
     NotificationsController,
+    BackupsController,
   ],
 })
 export class AdminModule {}
