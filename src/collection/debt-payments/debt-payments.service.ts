@@ -15,7 +15,7 @@ export class DebtPaymentsService {
     const session = await this.connection.startSession(); let response: any;
     try { await session.withTransaction(async () => {
       if (!actor.id || !Types.ObjectId.isValid(actor.id)) throw new ForbiddenException('Không xác định được tài khoản người thu');
-      const collector: any = await this.users.findOne({ _id: actor.id, isDeleted: false, status: UserStatus.ACTIVE, role: { $in: [RoleEnum.ADMIN, RoleEnum.STAFF] } }).select('_id employeeCode fullName username role').session(session).lean();
+      const collector: any = await this.users.findOne({ _id: actor.id, isDeleted: false, status: { $ne: UserStatus.INACTIVE }, role: { $in: [RoleEnum.ADMIN, RoleEnum.STAFF] } }).select('_id employeeCode fullName username role').session(session).lean();
       if (!collector) throw new ForbiddenException('Tài khoản nhân viên không còn hoạt động');
       const customerBefore: any = await this.customers.findOne({ _id: customerId, isDeleted: false }).session(session).lean(); if (!customerBefore) throw new NotFoundException('Không tìm thấy khách hàng');
       const selectedIds = [...new Set(dto.invoiceIds || [])]; const invoiceFilter: any = { customerId, debtAmount: { $gt: 0 }, isDeleted: false }; if (selectedIds.length) invoiceFilter._id = { $in: selectedIds };

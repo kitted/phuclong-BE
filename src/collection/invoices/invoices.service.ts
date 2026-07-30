@@ -312,7 +312,7 @@ export class InvoicesService {
             await this.debtLedgerModel.create([{ customerId: customer._id, customerCode: customer.code, type: DebtLedgerType.INVOICE_DEBT, direction: DebtLedgerDirection.INCREASE, amount: debtAmount, previousDebt: customer.debt || 0, increaseAmount: debtAmount, decreaseAmount: 0, balanceAfter: Number(customer.debt || 0) + debtAmount, previousDebtLimit: customer.debtLimit || 0, debtLimitAfter: customer.debtLimit || 0, occurredAt: date, effectiveAt: date, referenceType: 'INVOICE', referenceId: String(invoice._id), referenceCode: code, invoiceId: invoice._id, createdBy: actor.id }], { session });
           }
           if (existingDebtPaidAmount > 0) {
-            const collector: any = await this.userModel.findOne({ _id: actor.id, isDeleted: false, status: UserStatus.ACTIVE, role: { $in: [RoleEnum.ADMIN, RoleEnum.STAFF] } }).select('_id employeeCode fullName username role').session(session).lean();
+            const collector: any = await this.userModel.findOne({ _id: actor.id, isDeleted: false, status: { $ne: UserStatus.INACTIVE }, role: { $in: [RoleEnum.ADMIN, RoleEnum.STAFF] } }).select('_id employeeCode fullName username role').session(session).lean();
             if (!collector) throw new ForbiddenException('Tài khoản người thu không còn hoạt động');
             const receiptCounter: any = await this.debtPaymentCounterModel.findOneAndUpdate({ key: `DEBT_PAYMENT_${day.slice(2)}` }, { $inc: { sequence: 1 } }, { upsert: true, new: true, session });
             debtPaymentCode = `PTCN-${day.slice(2)}-${String(receiptCounter.sequence).padStart(6, '0')}`;
