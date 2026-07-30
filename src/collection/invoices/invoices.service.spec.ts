@@ -16,6 +16,7 @@ import { PromotionActivations } from '../promotion-activations/schemas/promotion
 import { CustomerDebtLedger } from '../debt-payments/schemas/customer-debt-ledger.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
 import { DebtPaymentCounters, DebtPayments } from '../debt-payments/schemas/debt-payments.schema';
+import { NotificationsService } from '../notifications/notifications.service';
 
 describe('invoice salesperson authorization', () => {
   const staffId = '507f1f77bcf86cd799439011';
@@ -45,6 +46,7 @@ describe('InvoicesService dependency injection', () => {
       { provide: InventoryMovementsService, useValue: {} },
       { provide: PromotionRuleEngineService, useValue: {} },
       { provide: PromotionActivationsService, useValue: {} },
+      { provide: NotificationsService, useValue: {} },
       { provide: getConnectionToken(), useValue: { startSession: jest.fn() } },
     ] }).compile();
     expect(module.get(InvoicesService)).toBeDefined();

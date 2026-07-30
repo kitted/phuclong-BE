@@ -4,8 +4,9 @@ import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { InvoicesService } from 'src/collection/invoices/invoices.service';
-import { ApplyGiftPromotionDto, CreateInvoiceDto, GiftPromotionPreviewDto, InvoicePreviewDto, InvoiceQueryDto } from 'src/collection/invoices/dtos/invoices.dto';
+import { ApplyGiftPromotionDto, CreateInvoiceDto, GiftPromotionPreviewDto, InvoicePreviewDto, InvoiceQueryDto, ReverseInvoiceDto } from 'src/collection/invoices/dtos/invoices.dto';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
+import { AdminOnly } from '../decorators/admin-only';
 
 @WarehouseController(['invoices'])
 export class InvoicesController {
@@ -42,9 +43,19 @@ export class InvoicesController {
     return await this.service.findAll(query, this.actor(request));
   }
 
+  @Get('timeline') @ApiOperation({ summary: 'Get invoice timeline with the same database-enforced visibility scope' })
+  timeline(@Query() query: InvoiceQueryDto, @Req() request: AuthRequest): Promise<any> {
+    return this.service.timeline(query, this.actor(request));
+  }
+
   @ApiOperation({ summary: 'Get filtered invoice revenue summary' })
   @Get('summary')
   summary(@Query() query: InvoiceQueryDto, @Req() request: AuthRequest): Promise<any> { return this.service.summary(query, this.actor(request)); }
+
+  @Post(':id/reverse') @AdminOnly() @ApiOperation({ summary: 'Reverse an invoice transactionally' })
+  reverse(@Param('id', ParseIdPipe) id: ID, @Body() dto: ReverseInvoiceDto, @Req() request: AuthRequest) {
+    return this.service.reverse(String(id), dto.reason, this.actor(request));
+  }
 
   @ApiOperation({ summary: 'Get invoice by ID' })
   @Get(':id')

@@ -30,4 +30,13 @@ describe('Invoices financial schema', () => {
     expect(schema.path('customerName')).toBeDefined();
     expect(schema.path('customerPhone')).toBeDefined();
   });
+
+  it('stores catalog and effective price independently for every sale line', () => {
+    const itemSchema = (schema.path('items') as any).schema;
+    expect(itemSchema.path('catalogPrice')).toBeDefined();
+    expect(itemSchema.path('price')).toBeDefined();
+    expect(itemSchema.path('priceOverridden')).toBeDefined();
+    expect(itemSchema.path('unitPriceOverride')).toBeDefined();
+    expect(itemSchema.path('priceOverriddenBy')).toBeDefined();
+  });
 });

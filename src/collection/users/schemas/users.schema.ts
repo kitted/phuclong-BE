@@ -31,6 +31,9 @@ export class Users extends BaseModel {
   @prop({ enum: UserStatus, default: UserStatus.ACTIVE, index: true })
   status: UserStatus;
 
+  @prop({ default: false })
+  canViewAllInvoices: boolean;
+
   @prop({ required: false, unique: true, sparse: true })
   employeeCode?: string;
 

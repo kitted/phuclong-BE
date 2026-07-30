@@ -53,7 +53,7 @@ export class EmployeeKpisService {
   async remove(id: string, actor?: string): Promise<any> { const doc = await this.model.findOneAndUpdate({ _id: id, isDeleted: false, status: EmployeeKpiStatus.DRAFT }, { isDeleted: true, deletedAt: new Date(), deletedBy: actor }, { new: true }); if (!doc) throw new BadRequestException('Chỉ có thể xóa KPI nháp'); return { data: { id, deleted: true } }; }
   private async actual(employeeId: any, from: Date, to: Date, target: any) {
     if (target.metric === EmployeeKpiMetric.PROMOTION_ACTIVATION_COUNT) return this.activations.countDocuments({ salespersonId: employeeId, activatedAt: { $gte: from, $lte: to }, status: PromotionActivationStatus.ACTIVE, isDeleted: false, ...(target.promotionId ? { promotionId: target.promotionId } : {}) });
-    const base: any = { salespersonId: employeeId, date: { $gte: from, $lte: to }, isDeleted: false };
+    const base: any = { salespersonId: employeeId, status: { $ne: 'REVERSED' }, date: { $gte: from, $lte: to }, isDeleted: false };
     if (target.metric === EmployeeKpiMetric.INVOICE_COUNT) return this.invoices.countDocuments(base);
     if (target.metric === EmployeeKpiMetric.TOTAL_REVENUE) { const rows = await this.invoices.aggregate([{ $match: base }, { $group: { _id: null, value: { $sum: '$grandTotal' } } }]); return rows[0]?.value || 0; }
     const itemFilter: any = {}; if (!target.includeGiftLines) itemFilter['items.lineType'] = InvoiceLineType.SALE; if (target.productIds?.length) itemFilter['items.productId'] = { $in: target.productIds }; if (target.categoryIds?.length) itemFilter['items.categoryId'] = { $in: target.categoryIds.map(String) }; if (target.brandIds?.length) itemFilter['items.brandId'] = { $in: target.brandIds }; if (target.productType) itemFilter['items.productType'] = target.productType;
@@ -72,7 +72,7 @@ export class EmployeeKpisService {
   async evidence(id: string, query: EmployeeKpiEvidenceQueryDto, employeeId?: string): Promise<any> {
     const { data: kpi }: any = await this.findOne(id, employeeId); const targetIndex = Number(query.targetIndex);
     if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= kpi.targets.length) throw new BadRequestException('Chỉ tiêu KPI không hợp lệ');
-    const target: any = kpi.targets[targetIndex]; const base = { salespersonId: kpi.employeeId, date: { $gte: kpi.from, $lte: kpi.to }, isDeleted: false };
+    const target: any = kpi.targets[targetIndex]; const base = { salespersonId: kpi.employeeId, status: { $ne: 'REVERSED' }, date: { $gte: kpi.from, $lte: kpi.to }, isDeleted: false };
     const invoices: any[] = await this.invoices.find(base).sort({ date: -1, createdAt: -1, _id: -1 }).populate('customerId', 'code name phone').lean();
     const invoiceIds = invoices.map((invoice) => invoice._id);
     const activationFilter: any = { salespersonId: kpi.employeeId, activatedAt: { $gte: kpi.from, $lte: kpi.to }, status: PromotionActivationStatus.ACTIVE, isDeleted: false, ...(target.promotionId ? { promotionId: target.promotionId } : {}) };

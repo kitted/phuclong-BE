@@ -15,6 +15,11 @@ describe('DebtPayments responsibility snapshot', () => {
     expect(schema.path('customerPhone').options.required).not.toBe(true);
   });
 
+  it('stores the part collected from opening/import debt without an invoice', () => {
+    expect(schema.path('unallocatedAmount')).toBeDefined();
+    expect(schema.path('unallocatedAmount').options.default).toBe(0);
+  });
+
   it('indexes receipts by collector and newest date', () => {
     expect(schema.indexes()).toContainEqual([
       { collectorId: 1, date: -1 },

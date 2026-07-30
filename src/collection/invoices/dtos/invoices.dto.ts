@@ -1,11 +1,12 @@
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsMongoId, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsMongoId, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { InvoicePaymentStatus, PaymentMethod } from '../schemas/invoices.schema';
 
 export class InvoiceItemDto {
   @ApiProperty() @IsMongoId() productId: string;
   @ApiProperty() @IsInt() @Min(1) qty: number;
+  @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0.01) unitPriceOverride?: number;
 }
 export class InvoiceGiftDto {
   @ApiProperty() @IsMongoId() productId: string;
@@ -75,4 +76,7 @@ export class InvoiceQueryDto {
   @ApiPropertyOptional({ enum: InvoicePaymentStatus }) @IsOptional() @IsEnum(InvoicePaymentStatus) paymentStatus?: InvoicePaymentStatus;
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
+}
+export class ReverseInvoiceDto {
+  @ApiProperty() @IsString() reason: string;
 }

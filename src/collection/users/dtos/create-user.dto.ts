@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
 import { RoleEnum } from '../interfaces/role.enum';
 import { UserStatus } from '../schemas/users.schema';
 
@@ -36,6 +36,7 @@ export class CreateUserDto {
   @ApiPropertyOptional() @IsOptional() @IsEmail() email?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() employeeCode?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
+  @ApiPropertyOptional({ default: false }) @IsOptional() @IsBoolean() canViewAllInvoices?: boolean;
 }
 
 export class UpdateUserDto extends PartialType(CreateUserDto) {}

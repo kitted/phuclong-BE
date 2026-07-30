@@ -11,4 +11,8 @@ describe('Users schema security', () => {
   it('creates active accounts by default', () => {
     expect(schema.path('status').options.default).toBe(UserStatus.ACTIVE);
   });
+
+  it('does not grant company-wide invoice visibility by default', () => {
+    expect(schema.path('canViewAllInvoices').options.default).toBe(false);
+  });
 });

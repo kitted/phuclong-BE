@@ -8,6 +8,7 @@ import { Users } from '../../users/schemas/users.schema';
 
 export enum PaymentMethod { CASH = 'CASH', BANK_TRANSFER = 'BANK_TRANSFER' }
 export enum InvoicePaymentStatus { UNPAID = 'UNPAID', PARTIAL = 'PARTIAL', PAID = 'PAID' }
+export enum InvoiceStatus { ACTIVE = 'ACTIVE', REVERSED = 'REVERSED' }
 export enum InvoiceLineType { SALE = 'SALE', GIFT = 'GIFT' }
 
 export class InvoicePayment {
@@ -38,6 +39,10 @@ export class InvoiceItem {
   @prop() productType?: string;
   @prop({ required: true, min: 1 }) qty: number;
   @prop({ required: true, min: 0 }) price: number;
+  @prop({ required: true, min: 0 }) catalogPrice: number;
+  @prop({ default: false }) priceOverridden: boolean;
+  @prop({ min: 0 }) unitPriceOverride?: number;
+  @prop({ ref: () => Users }) priceOverriddenBy?: Ref<Users>;
   @prop({ required: true, min: 0 }) lineTotal: number;
   @prop({ enum: InvoiceLineType, default: InvoiceLineType.SALE }) lineType: InvoiceLineType;
   @prop({ min: 0 }) originalPrice?: number;
@@ -90,6 +95,11 @@ export class InvoicePromotionApplication {
 export class Invoices extends BaseModel {
   @prop({ required: true, unique: true }) code: string;
   @prop({ required: true }) date: Date;
+  @prop({ enum: InvoiceStatus, default: InvoiceStatus.ACTIVE, index: true }) status: InvoiceStatus;
+  @prop() reversedAt?: Date;
+  @prop({ ref: () => Users }) reversedBy?: Ref<Users>;
+  @prop() reversalReason?: string;
+  @prop() reversalCode?: string;
   @prop({ default: 'Khách lẻ' }) customer: string;
   @prop({ ref: () => Customers, default: null, index: true }) customerId?: Ref<Customers>;
   @prop() customerCode?: string;

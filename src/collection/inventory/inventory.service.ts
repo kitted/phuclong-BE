@@ -194,7 +194,7 @@ export class InventoryService {
       this.movementModel.countDocuments(filter),
     ]);
     const data = movements.map((movement: any) => ({
-      id: String(movement._id), type: movement.type, quantityChange: movement.quantityChange,
+      id: String(movement._id), productId: String(movement.productId), type: movement.type, quantityChange: movement.quantityChange,
       quantityBefore: movement.quantityBefore, quantityAfter: movement.quantityAfter,
       sourceLocation: this.location(movement.sourceType, movement.sourceTruckId),
       destinationLocation: this.location(movement.destinationType, movement.destinationTruckId),

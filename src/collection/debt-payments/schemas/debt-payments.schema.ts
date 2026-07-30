@@ -14,7 +14,7 @@ export class DebtPaymentAllocation { @prop({ ref: () => Invoices, required: true
 export class DebtPayments extends BaseModel {
   @prop({ required: true, unique: true }) code: string; @prop({ required: true }) date: Date;
   @prop({ ref: () => Customers, required: true }) customerId: Ref<Customers>; @prop() customerCode?: string; @prop({ required: true }) customerName: string; @prop() customerPhone?: string;
-  @prop({ required: true, min: 0 }) amount: number; @prop({ type: () => [DebtReceiptPayment], default: [] }) payments: DebtReceiptPayment[]; @prop({ type: () => [DebtPaymentAllocation], default: [] }) allocations: DebtPaymentAllocation[];
+  @prop({ required: true, min: 0 }) amount: number; @prop({ type: () => [DebtReceiptPayment], default: [] }) payments: DebtReceiptPayment[]; @prop({ type: () => [DebtPaymentAllocation], default: [] }) allocations: DebtPaymentAllocation[]; @prop({ default: 0, min: 0 }) unallocatedAmount: number;
   @prop({ required: true, min: 0 }) customerDebtBefore: number; @prop({ required: true, min: 0 }) customerDebtAfter: number;
   @prop({ enum: DebtPaymentStatus, default: DebtPaymentStatus.ACTIVE }) status: DebtPaymentStatus; @prop() note?: string;
   @prop({ ref: () => Users, required: true }) collectorId: Ref<Users>; @prop() collectorCode?: string; @prop({ required: true }) collectorName: string;

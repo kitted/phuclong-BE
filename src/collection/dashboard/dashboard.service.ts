@@ -78,7 +78,11 @@ export class DashboardService {
     from: Date,
     to: Date,
   ) {
-    const filter: any = { isDeleted: false, date: { $gte: from, $lte: to } };
+    const filter: any = {
+      isDeleted: false,
+      status: { $ne: 'REVERSED' },
+      date: { $gte: from, $lte: to },
+    };
     const salespersonId = this.scope(query, actor);
     if (salespersonId) filter.salespersonId = salespersonId;
     if (query.truckId) filter.truckId = query.truckId;
