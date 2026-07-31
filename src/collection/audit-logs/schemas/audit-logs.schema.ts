@@ -7,7 +7,6 @@ export enum AuditLogAction { READ = 'READ', CREATE = 'CREATE', UPDATE = 'UPDATE'
 @index({ actorId: 1, occurredAt: -1 })
 @index({ resource: 1, entityId: 1, occurredAt: -1 })
 @index({ status: 1, action: 1, occurredAt: -1 })
-@index({ correlationId: 1 })
 export class AuditLogs extends BaseModel {
   @prop({ required: true, unique: true }) correlationId: string;
   @prop({ required: true }) occurredAt: Date;
