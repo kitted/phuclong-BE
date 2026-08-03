@@ -27,6 +27,7 @@ import { AuditLogsModule } from './collection/audit-logs/audit-logs.module';
 import { ReportsModule } from './collection/reports/reports.module';
 import { NotificationsModule } from './collection/notifications/notifications.module';
 import { BackupsModule } from './collection/backups/backups.module';
+import { CustomerReturnsModule } from './collection/customer-returns/customer-returns.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { BackupsModule } from './collection/backups/backups.module';
     ReportsModule,
     NotificationsModule,
     BackupsModule,
+    CustomerReturnsModule,
     PublicModule,
     AdminModule,
     RouterModule.register([

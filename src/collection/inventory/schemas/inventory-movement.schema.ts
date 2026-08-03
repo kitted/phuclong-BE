@@ -17,6 +17,9 @@ export enum InventoryMovementType {
   INVOICE_GIFT_FROM_TRUCK = 'INVOICE_GIFT_FROM_TRUCK',
   INVOICE_REVERSAL_TO_WAREHOUSE = 'INVOICE_REVERSAL_TO_WAREHOUSE',
   INVOICE_REVERSAL_TO_TRUCK = 'INVOICE_REVERSAL_TO_TRUCK',
+  CUSTOMER_RETURN_TO_TRUCK = 'CUSTOMER_RETURN_TO_TRUCK',
+  CUSTOMER_RETURN_REVERSED = 'CUSTOMER_RETURN_REVERSED',
+  RETURN_STOCK_CLASSIFIED = 'RETURN_STOCK_CLASSIFIED',
 }
 
 export enum InventoryLocationType {
@@ -64,4 +67,9 @@ export class InventoryMovements extends BaseModel {
 
   @prop()
   createdBy?: string;
+
+  @prop() returnQuantity?: number;
+  @prop() previousUnitPrice?: number;
+  @prop() returnUnitPrice?: number;
+  @prop() returnAmount?: number;
 }

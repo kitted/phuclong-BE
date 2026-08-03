@@ -15,6 +15,7 @@ import { EmployeeKpisModule } from 'src/collection/employee-kpis/employee-kpis.m
 import { DebtPaymentsModule } from 'src/collection/debt-payments/debt-payments.module';
 import { ReportsModule } from 'src/collection/reports/reports.module';
 import { NotificationsModule } from 'src/collection/notifications/notifications.module';
+import { CustomerReturnsModule } from 'src/collection/customer-returns/customer-returns.module';
 
 import { UsersController } from './controllers/users';
 import { CategoriesController } from './controllers/categories.controller';
@@ -35,6 +36,7 @@ import { AuditLogsController } from './controllers/audit-logs.controller';
 import { ReportsController } from './controllers/reports.controller';
 import { NotificationsController } from './controllers/notifications.controller';
 import { BackupsController } from './controllers/backups.controller';
+import { CustomerReturnsController, TruckUnclassifiedReturnStockController, UnclassifiedReturnStockController } from './controllers/customer-returns.controller';
 
 @Module({
   imports: [
@@ -54,6 +56,7 @@ import { BackupsController } from './controllers/backups.controller';
     DebtPaymentsModule,
     ReportsModule,
     NotificationsModule,
+    CustomerReturnsModule,
   ],
   controllers: [
     UsersController,
@@ -75,6 +78,9 @@ import { BackupsController } from './controllers/backups.controller';
     ReportsController,
     NotificationsController,
     BackupsController,
+    CustomerReturnsController,
+    TruckUnclassifiedReturnStockController,
+    UnclassifiedReturnStockController,
   ],
 })
 export class AdminModule {}
