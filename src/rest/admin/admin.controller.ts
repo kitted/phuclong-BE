@@ -25,7 +25,7 @@ import { TrucksController, TruckStockChecksController, TruckInventoryBackupsCont
 import { ImportsController } from './controllers/imports.controller';
 import { InvoicesController } from './controllers/invoices.controller';
 import { DashboardController } from './controllers/dashboard.controller';
-import { InventoryController } from './controllers/inventory.controller';
+import { InventoryController,InventoryStockChecksController,InventoryBackupsController } from './controllers/inventory.controller';
 import { CustomersController } from './controllers/customers.controller';
 import { PromotionsController } from './controllers/promotions.controller';
 import { TruckTransfersController } from './controllers/truck-transfers.controller';
@@ -70,6 +70,8 @@ import { CustomerReturnsController, TruckUnclassifiedReturnStockController, Uncl
     InvoicesController,
     DashboardController,
     InventoryController,
+    InventoryStockChecksController,
+    InventoryBackupsController,
     CustomersController,
     PromotionsController,
     TruckTransfersController,
