@@ -22,6 +22,7 @@ import {
   CustomerDebtLedger,
   DebtLedgerDirection,
 } from '../debt-payments/schemas/customer-debt-ledger.schema';
+import { Customers } from '../customers/schemas/customers.schema';
 @Injectable()
 export class ReportsService {
   private admin = { role: RoleEnum.ADMIN };
@@ -36,6 +37,7 @@ export class ReportsService {
     private movements: ReturnModelType<typeof InventoryMovements>,
     @InjectModel(CustomerDebtLedger)
     private ledger: ReturnModelType<typeof CustomerDebtLedger>,
+    @InjectModel(Customers) private customersModel: ReturnModelType<typeof Customers>,
   ) {}
   private filter(query: DashboardPeriodQueryDto, from: Date, to: Date) {
     const filter: any = {
@@ -367,8 +369,30 @@ export class ReportsService {
   trucks(query: DashboardPeriodQueryDto) {
     return this.dashboard.trucks(query, this.admin);
   }
-  customers(query: DashboardPeriodQueryDto) {
-    return this.dashboard.customerMetrics(query, this.admin);
+  async customers(query: DashboardPeriodQueryDto, exportAll = false): Promise<any> {
+    const period = resolveReportPeriod(query);
+    const searchFilter: any = { isDeleted: false };
+    if (query.search?.trim()) {
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      searchFilter.$or = ['code', 'name', 'phone', 'phones'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
+    }
+    const [customers, invoices, receipts]: any[][] = await Promise.all([
+      this.customersModel.find(searchFilter).select('code name phone phones').sort({ code: 1, name: 1, _id: 1 }).lean(),
+      this.invoices.find({ isDeleted: { $ne: true }, status: { $ne: 'REVERSED' }, customerId: { $ne: null }, date: { $gte: period.from, $lte: period.to } }).select('customerId grandTotal initialDebtAmount debtAmount payments').lean(),
+      this.debtPayments.find({ isDeleted: false, status: DebtPaymentStatus.ACTIVE, date: { $gte: period.from, $lte: period.to } }).select('customerId payments').lean(),
+    ]);
+    const metrics = new Map<string, any>();
+    const get = (id: string) => { if (!metrics.has(id)) metrics.set(id, { invoiceCount: 0, purchaseAmount: 0, debtAddedAmount: 0, cashPaidAmount: 0 }); return metrics.get(id); };
+    for (const invoice of invoices) { const m = get(String(invoice.customerId)); m.invoiceCount += 1; m.purchaseAmount += Number(invoice.grandTotal || 0); m.debtAddedAmount += invoice.initialDebtAmount !== undefined ? Number(invoice.initialDebtAmount || 0) : Number(invoice.debtAmount || 0); m.cashPaidAmount += (invoice.payments || []).filter((p) => p.method === PaymentMethod.CASH).reduce((sum, p) => sum + Number(p.amount || 0), 0); }
+    for (const receipt of receipts) { const m = get(String(receipt.customerId)); m.cashPaidAmount += (receipt.payments || []).filter((p) => p.method === PaymentMethod.CASH).reduce((sum, p) => sum + Number(p.amount || 0), 0); }
+    const allRows = customers.map((customer: any) => { const m = metrics.get(String(customer._id)) || { invoiceCount: 0, purchaseAmount: 0, debtAddedAmount: 0, cashPaidAmount: 0 }; const hasPurchased = m.invoiceCount > 0; return { customerId: String(customer._id), customerCode: customer.code || '', customerName: customer.name, phone: customer.phone || customer.phones?.[0] || '', hasPurchased, purchaseStatus: hasPurchased ? 'PURCHASED' : 'NOT_PURCHASED', ...m }; });
+    const purchased = allRows.filter((row) => row.hasPurchased);
+    const status = query.purchaseStatus || 'ALL';
+    const filtered = status === 'PURCHASED' ? purchased : status === 'NOT_PURCHASED' ? allRows.filter((row) => !row.hasPurchased) : allRows;
+    const page = Math.max(1, Number(query.page) || 1), limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
+    const visible = exportAll ? filtered : filtered.slice((page - 1) * limit, page * limit);
+    const data = visible.map((row, index) => ({ ...row, rowNumber: exportAll ? index + 1 : (page - 1) * limit + index + 1 }));
+    return { data: { period, summary: { totalCustomers: allRows.length, customersWithInvoices: purchased.length, customersWithoutInvoices: allRows.length - purchased.length, invoiceCount: allRows.reduce((s, x) => s + x.invoiceCount, 0), purchaseAmount: allRows.reduce((s, x) => s + x.purchaseAmount, 0), debtAddedAmount: allRows.reduce((s, x) => s + x.debtAddedAmount, 0), cashPaidAmount: allRows.reduce((s, x) => s + x.cashPaidAmount, 0) }, data, meta: { page: exportAll ? 1 : page, limit: exportAll ? filtered.length : limit, totalItems: filtered.length, totalPages: exportAll ? (filtered.length ? 1 : 0) : Math.ceil(filtered.length / limit) } } };
   }
   promotions(query: DashboardPeriodQueryDto) {
     return this.dashboard.promotionMetrics(query, this.admin);
@@ -408,12 +432,13 @@ export class ReportsService {
               : key === 'TRUCKS'
                 ? await this.trucks(query)
                 : key === 'CUSTOMERS'
-                  ? await this.customers(query)
+                  ? await this.customers(query, true)
                   : key === 'PROMOTIONS'
                     ? await this.promotions(query)
                     : key === 'EMPLOYEES'
                       ? await this.employees(query)
                       : await this.sales(query);
+    if (key === 'CUSTOMERS') return this.exportCustomers(data, query);
     const workbook = new ExcelJS.Workbook();
     const overview = workbook.addWorksheet('Tong quan'),
       detail = workbook.addWorksheet('Du lieu chi tiet'),
@@ -446,6 +471,43 @@ export class ReportsService {
     ]);
     for (const sheet of workbook.worksheets)
       sheet.getRow(1).font = { bold: true };
+    return Buffer.from(await workbook.xlsx.writeBuffer());
+  }
+
+  private async exportCustomers(result: any, query: DashboardPeriodQueryDto): Promise<Buffer> {
+    const workbook = new ExcelJS.Workbook();
+    const detail = workbook.addWorksheet('Khach hang');
+    detail.columns = [
+      { header: 'STT', key: 'rowNumber', width: 8 },
+      { header: 'Mã khách hàng', key: 'customerCode', width: 18 },
+      { header: 'Tên khách hàng', key: 'customerName', width: 34 },
+      { header: 'Số điện thoại', key: 'phone', width: 18 },
+      { header: 'Tình trạng mua hàng', key: 'purchaseStatusLabel', width: 22 },
+      { header: 'Số hóa đơn', key: 'invoiceCount', width: 14 },
+      { header: 'Tiền hàng đã mua', key: 'purchaseAmount', width: 20 },
+      { header: 'Công nợ cộng thêm', key: 'debtAddedAmount', width: 20 },
+      { header: 'Tiền mặt đã trả', key: 'cashPaidAmount', width: 20 },
+    ];
+    for (const row of result.data.data || []) detail.addRow({ ...row, purchaseStatusLabel: row.hasPurchased ? 'Có mua hàng' : 'Không mua hàng' });
+    detail.views = [{ state: 'frozen', ySplit: 1 }];
+    detail.autoFilter = { from: 'A1', to: 'I1' };
+    detail.getRow(1).font = { bold: true };
+    detail.getRow(1).alignment = { vertical: 'middle' };
+    for (const column of ['F', 'G', 'H', 'I']) detail.getColumn(column).numFmt = '#,##0';
+
+    const filters = workbook.addWorksheet('Bo loc');
+    filters.columns = [{ header: 'Bộ lọc', key: 'key', width: 30 }, { header: 'Giá trị', key: 'value', width: 45 }];
+    filters.addRows([
+      { key: 'Kỳ báo cáo', value: query.period || result.data.period?.type || 'MONTH' },
+      { key: 'Từ ngày', value: result.data.period?.from ? new Date(result.data.period.from).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '' },
+      { key: 'Đến ngày', value: result.data.period?.to ? new Date(result.data.period.to).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '' },
+      { key: 'Trạng thái mua hàng', value: query.purchaseStatus || 'ALL' },
+      { key: 'Tìm kiếm', value: query.search || '' },
+      { key: 'Timezone', value: 'Asia/Ho_Chi_Minh' },
+    ]);
+    filters.views = [{ state: 'frozen', ySplit: 1 }];
+    filters.autoFilter = { from: 'A1', to: 'B1' };
+    filters.getRow(1).font = { bold: true };
     return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 }
