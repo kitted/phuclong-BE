@@ -73,3 +73,4 @@ export class TruckTransferQueryDto {
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
 }
+export class TruckGoodsReportQueryDto { @ApiPropertyOptional() @IsOptional() @IsDateString() from?: string; @ApiPropertyOptional() @IsOptional() @IsDateString() to?: string; }

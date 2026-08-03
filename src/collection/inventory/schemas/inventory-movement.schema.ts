@@ -20,6 +20,8 @@ export enum InventoryMovementType {
   CUSTOMER_RETURN_TO_TRUCK = 'CUSTOMER_RETURN_TO_TRUCK',
   CUSTOMER_RETURN_REVERSED = 'CUSTOMER_RETURN_REVERSED',
   RETURN_STOCK_CLASSIFIED = 'RETURN_STOCK_CLASSIFIED',
+  TRUCK_STOCK_CHECK_GAIN = 'TRUCK_STOCK_CHECK_GAIN',
+  TRUCK_STOCK_CHECK_LOSS = 'TRUCK_STOCK_CHECK_LOSS',
 }
 
 export enum InventoryLocationType {
@@ -72,4 +74,6 @@ export class InventoryMovements extends BaseModel {
   @prop() previousUnitPrice?: number;
   @prop() returnUnitPrice?: number;
   @prop() returnAmount?: number;
+  @prop() backupId?: string;
+  @prop() reason?: string;
 }

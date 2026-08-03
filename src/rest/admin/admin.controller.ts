@@ -21,7 +21,7 @@ import { UsersController } from './controllers/users';
 import { CategoriesController } from './controllers/categories.controller';
 import { SuppliersController } from './controllers/suppliers.controller';
 import { ProductsController } from './controllers/products.controller';
-import { TrucksController } from './controllers/trucks.controller';
+import { TrucksController, TruckStockChecksController, TruckInventoryBackupsController } from './controllers/trucks.controller';
 import { ImportsController } from './controllers/imports.controller';
 import { InvoicesController } from './controllers/invoices.controller';
 import { DashboardController } from './controllers/dashboard.controller';
@@ -64,6 +64,8 @@ import { CustomerReturnsController, TruckUnclassifiedReturnStockController, Uncl
     SuppliersController,
     ProductsController,
     TrucksController,
+    TruckStockChecksController,
+    TruckInventoryBackupsController,
     ImportsController,
     InvoicesController,
     DashboardController,

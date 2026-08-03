@@ -1,4 +1,5 @@
-import { Body, Get, Param, Post, Query, Req } from '@nestjs/common';
+import { Body, Get, Param, Post, Query, Req, Res, StreamableFile } from '@nestjs/common';
+import { Response } from 'express';
 import { ApiOperation } from '@nestjs/swagger';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
@@ -51,6 +52,13 @@ export class InvoicesController {
   @ApiOperation({ summary: 'Get filtered invoice revenue summary' })
   @Get('summary')
   summary(@Query() query: InvoiceQueryDto, @Req() request: AuthRequest): Promise<any> { return this.service.summary(query, this.actor(request)); }
+
+  @Get('export') @ApiOperation({ summary: 'Export all visible invoice timeline documents to XLSX' })
+  async export(@Query() query: InvoiceQueryDto, @Req() request: AuthRequest, @Res({ passthrough: true }) response: Response): Promise<StreamableFile> {
+    const file = await this.service.export(query, this.actor(request));
+    response.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="invoices-${query.from || 'all'}-${query.to || 'all'}.xlsx"` });
+    return new StreamableFile(file);
+  }
 
   @Post(':id/reverse') @AdminOnly() @ApiOperation({ summary: 'Reverse an invoice transactionally' })
   reverse(@Param('id', ParseIdPipe) id: ID, @Body() dto: ReverseInvoiceDto, @Req() request: AuthRequest) {

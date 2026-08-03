@@ -24,6 +24,7 @@ import { CustomerDebtLedger, DebtLedgerDirection, DebtLedgerType } from '../debt
 import { DebtPaymentCounters, DebtPayments, DebtPaymentStatus } from '../debt-payments/schemas/debt-payments.schema';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/schemas/notifications.schema';
+import * as ExcelJS from 'exceljs';
 
 type Actor = { id?: string; role?: RoleEnum };
 
@@ -454,8 +455,15 @@ export class InvoicesService {
   }
 
   async timeline(query: InvoiceQueryDto = {}, actor: Actor = {}): Promise<any> {
-    const access = await this.resolveInvoiceReadScope(actor);
+    const { invoiceFilter, receiptFilter } = await this.timelineFilters(query, actor);
     const page = Math.max(1, Number(query.page) || 1); const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
+    const documents = await this.timelineDocuments(invoiceFilter, receiptFilter);
+    const total = documents.length;
+    return { data: documents.slice((page - 1) * limit, page * limit), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
+
+  private async timelineFilters(query: InvoiceQueryDto, actor: Actor): Promise<{ invoiceFilter: any; receiptFilter: any }> {
+    const access = await this.resolveInvoiceReadScope(actor);
     const invoiceFilter: any = { isDeleted: false };
     const receiptFilter: any = { isDeleted: false };
     const salespersonId = access.canViewAll ? query.salespersonId : access.id;
@@ -471,6 +479,10 @@ export class InvoicesService {
       invoiceFilter.$or = [{ code: regex }, { customer: regex }, { customerCode: regex }, { customerName: regex }, { customerPhone: regex }, { salespersonCode: regex }, { salespersonName: regex }, { 'promotionApplications.activationCode': regex }];
       receiptFilter.$or = [{ code: regex }, { customerCode: regex }, { customerName: regex }, { customerPhone: regex }, { collectorCode: regex }, { collectorName: regex }, { 'allocations.invoiceCode': regex }];
     }
+    return { invoiceFilter, receiptFilter };
+  }
+
+  private async timelineDocuments(invoiceFilter: any, receiptFilter: any): Promise<any[]> {
     const [invoices, receipts] = await Promise.all([
       this.model.find(invoiceFilter).select('-__v').populate('customerId', 'code name phone phones address').populate('salespersonId', 'employeeCode fullName').lean(),
       this.debtPaymentModel.find(receiptFilter).select('-__v').lean(),
@@ -482,8 +494,42 @@ export class InvoicesService {
       const dateDifference = new Date(right.date || right.createdAt).getTime() - new Date(left.date || left.createdAt).getTime();
       return dateDifference || String(right._id).localeCompare(String(left._id));
     });
-    const total = documents.length;
-    return { data: documents.slice((page - 1) * limit, page * limit), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    return documents;
+  }
+
+  async export(query: InvoiceQueryDto = {}, actor: Actor = {}): Promise<Buffer> {
+    const { invoiceFilter, receiptFilter } = await this.timelineFilters({ ...query, page: undefined, limit: undefined }, actor);
+    const documents = await this.timelineDocuments(invoiceFilter, receiptFilter);
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Phuc Long'; workbook.created = new Date();
+    const invoicesSheet = workbook.addWorksheet('Danh sách hóa đơn', { views: [{ state: 'frozen', ySplit: 1 }] });
+    invoicesSheet.columns = [
+      { header: 'STT', key: 'number', width: 7 }, { header: 'Loại chứng từ', key: 'documentType', width: 22 }, { header: 'Mã chứng từ', key: 'code', width: 22 }, { header: 'Ngày giờ', key: 'date', width: 20 },
+      { header: 'Mã khách hàng', key: 'customerCode', width: 17 }, { header: 'Tên khách hàng', key: 'customerName', width: 30 }, { header: 'Số điện thoại', key: 'customerPhone', width: 17 }, { header: 'Nhân viên', key: 'employee', width: 24 },
+      { header: 'Hàng hóa', key: 'products', width: 48 }, { header: 'Tổng tiền hàng', key: 'grandTotal', width: 18 }, { header: 'Số tiền thanh toán (3)', key: 'receivedAmount', width: 22 }, { header: 'Nợ cũ (2)', key: 'customerDebtBefore', width: 16 },
+      { header: 'Công nợ còn lại', key: 'customerDebtAfter', width: 20 }, { header: 'Trạng thái', key: 'status', width: 22 }, { header: 'Ghi chú', key: 'note', width: 36 },
+    ];
+    let productNumber = 0; const productRows: any[] = [];
+    documents.forEach((doc: any, index) => {
+      const receipt = doc.documentType === 'DEBT_PAYMENT'; const customer: any = doc.customerId && typeof doc.customerId === 'object' ? doc.customerId : {};
+      const items: any[] = receipt ? [{ productId: 'DEBT_PAYMENT', productName: 'THANH TOÁN CÔNG NỢ', unit: 'Lần', qty: 1, price: 0, lineTotal: Number(doc.amount || 0), lineType: InvoiceLineType.SALE }] : (doc.items || []);
+      const reversed = doc.status === InvoiceStatus.REVERSED || Boolean(doc.reversedAt);
+      const receivedAmount = receipt ? Number(doc.amount || 0) : Number(doc.receivedAmount ?? doc.paidAmount ?? 0);
+      invoicesSheet.addRow({ number: index + 1, documentType: receipt ? 'Thanh toán công nợ' : 'Hóa đơn bán hàng', code: doc.code || '', date: new Date(doc.date || doc.createdAt), customerCode: doc.customerCode || customer.code || '', customerName: doc.customerName || customer.name || doc.customer || 'Khách lẻ', customerPhone: doc.customerPhone || customer.phone || '', employee: doc.salespersonName || doc.collectorName || doc.salespersonId?.fullName || '', products: items.map((item) => `${item.productName || 'Sản phẩm'} x ${Number(item.qty || 0)}${item.lineType === InvoiceLineType.GIFT ? ' (Quà tặng)' : ''}`).join('; '), grandTotal: receipt ? 0 : Number(doc.grandTotal ?? doc.totalAmount ?? 0), receivedAmount, customerDebtBefore: Number(doc.customerDebtBefore || 0), customerDebtAfter: Number(doc.customerDebtAfter ?? (receipt ? 0 : doc.debtAmount) ?? 0), status: reversed ? 'Đã hoàn' : receipt ? (doc.status === DebtPaymentStatus.CANCELLED ? 'Phiếu thu đã hủy' : 'Đã thu công nợ') : doc.paymentStatus === InvoicePaymentStatus.PAID ? 'Đã thanh toán' : doc.paymentStatus === InvoicePaymentStatus.PARTIAL ? 'Thanh toán một phần' : 'Chưa thanh toán', note: doc.note || '' });
+      for (const item of items) { productNumber += 1; productRows.push({ number: productNumber, code: doc.code || '', date: new Date(doc.date || doc.createdAt), customerCode: doc.customerCode || customer.code || '', customerName: doc.customerName || customer.name || doc.customer || 'Khách lẻ', productCode: item.productCode || '', productName: item.productName || 'Sản phẩm', classification: item.productId === 'DEBT_PAYMENT' ? 'Thanh toán công nợ' : item.lineType === InvoiceLineType.GIFT ? 'Quà tặng' : 'Hàng bán', unit: item.unit || '', quantity: Number(item.qty || 0), catalogPrice: Number(item.catalogPrice ?? item.originalPrice ?? item.price ?? 0), price: Number(item.price || 0), lineTotal: Number(item.lineTotal || 0), invoiceTotal: receipt ? 0 : Number(doc.grandTotal ?? doc.totalAmount ?? 0), receivedAmount, customerDebtAfter: Number(doc.customerDebtAfter ?? doc.debtAmount ?? 0) }); }
+    });
+    const productsSheet = workbook.addWorksheet('Sản phẩm đã bán', { views: [{ state: 'frozen', ySplit: 1 }] });
+    productsSheet.columns = [
+      { header: 'STT', key: 'number', width: 7 }, { header: 'Mã chứng từ', key: 'code', width: 22 }, { header: 'Ngày giờ', key: 'date', width: 20 }, { header: 'Mã khách hàng', key: 'customerCode', width: 17 }, { header: 'Tên khách hàng', key: 'customerName', width: 30 },
+      { header: 'Mã sản phẩm', key: 'productCode', width: 18 }, { header: 'Tên sản phẩm', key: 'productName', width: 36 }, { header: 'Phân loại', key: 'classification', width: 20 }, { header: 'Đơn vị', key: 'unit', width: 12 }, { header: 'Số lượng', key: 'quantity', width: 12 },
+      { header: 'Giá niêm yết', key: 'catalogPrice', width: 18 }, { header: 'Giá bán', key: 'price', width: 18 }, { header: 'Thành tiền', key: 'lineTotal', width: 18 }, { header: 'Tổng hóa đơn', key: 'invoiceTotal', width: 18 }, { header: 'Số tiền thanh toán (3)', key: 'receivedAmount', width: 22 }, { header: 'Công nợ còn lại', key: 'customerDebtAfter', width: 20 },
+    ];
+    productsSheet.addRows(productRows);
+    for (const sheet of [invoicesSheet, productsSheet]) { sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } }; sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1565C0' } }; sheet.getRow(1).alignment = { vertical: 'middle' }; sheet.autoFilter = { from: 'A1', to: sheet.getRow(1).getCell(sheet.columnCount).address }; }
+    invoicesSheet.getColumn('date').numFmt = 'dd/mm/yyyy hh:mm'; productsSheet.getColumn('date').numFmt = 'dd/mm/yyyy hh:mm';
+    for (const key of ['grandTotal', 'receivedAmount', 'customerDebtBefore', 'customerDebtAfter']) invoicesSheet.getColumn(key).numFmt = '#,##0';
+    for (const key of ['quantity', 'catalogPrice', 'price', 'lineTotal', 'invoiceTotal', 'receivedAmount', 'customerDebtAfter']) productsSheet.getColumn(key).numFmt = '#,##0';
+    return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
   async summary(query: InvoiceQueryDto, actor: Actor = {}): Promise<any> {
