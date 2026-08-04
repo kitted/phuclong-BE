@@ -40,7 +40,85 @@ export class CustomerReturnsService {
       const ids = dto.items.map((x) => x.productId).filter(Boolean); const productRows: any[] = ids.length ? await this.products.find({ _id: { $in: ids }, isDeleted: false }).session(session).lean() : []; const map = new Map(productRows.map((p) => [String(p._id), p])); if (map.size !== new Set(ids).size) this.fail('CUSTOMER_RETURN_PRODUCT_NOT_FOUND', 'Có sản phẩm không tồn tại');
       const code = await this.nextCode(session), returnId = new Types.ObjectId(), items: any[] = [], movementRows: any[] = [];
       for (const line of calculated.lines) { const lineId = randomUUID(); if (line.productId) { const p: any = map.get(line.productId); let inv: any = truck.inventory.find((x: any) => String(x.productId) === line.productId); const before = Number(inv?.qty || 0); if (inv) inv.qty = before + line.qty; else truck.inventory.push({ productId: p._id, qty: line.qty }); items.push({ lineId, itemType: ReturnItemType.CATALOG, productId: String(p._id), productCode: p.code, productName: p.name, unit: p.unit, qty: line.qty, previousUnitPrice: line.previousUnitPrice, returnUnitPrice: line.returnUnitPrice, lineReturnAmount: line.lineReturnAmount, priceDifference: line.priceDifference, condition: line.condition, note: line.note }); movementRows.push({ productId: p._id, type: InventoryMovementType.CUSTOMER_RETURN_TO_TRUCK, quantityChange: line.qty, quantityBefore: before, quantityAfter: before + line.qty, destinationType: InventoryLocationType.TRUCK, destinationTruckId: truck._id, referenceType: 'CUSTOMER_RETURN', referenceId: String(returnId), referenceCode: code, createdBy: actorId, returnQuantity: line.qty, previousUnitPrice: line.previousUnitPrice, returnUnitPrice: line.returnUnitPrice, returnAmount: line.lineReturnAmount }); }
-        else { const m = line.manualProduct!; const stock: any = (await this.unclassified.create([{ truckId: String(truck._id), manualCode: m.code?.trim(), name: m.name.trim(), normalizedName: this.normalized(m.name), unit: m.unit.trim(), quantity: line.qty, referenceUnitPrice: line.previousUnitPrice, returnUnitPrice: line.returnUnitPrice, totalReturnValue: line.lineReturnAmount, condition: line.condition, sourceReturnIds: [String(returnId)], status: UnclassifiedStatus.UNCLASSIFIED }], { session }))[0]; items.push({ lineId, itemType: ReturnItemType.MANUAL, manualCode: m.code?.trim(), manualName: m.name.trim(), manualUnit: m.unit.trim(), qty: line.qty, previousUnitPrice: line.previousUnitPrice, returnUnitPrice: line.returnUnitPrice, lineReturnAmount: line.lineReturnAmount, priceDifference: line.priceDifference, condition: line.condition, note: line.note, unclassifiedStockId: String(stock._id) }); } }
+        else {
+          const m = line.manualProduct!;
+          // Try to find existing product by code (if provided) or by name (case-insensitive) + unit
+          let existingProduct: any = null;
+          if (m.code?.trim()) {
+            existingProduct = await this.products.findOne({ code: m.code.trim().toUpperCase(), isDeleted: false }).session(session).lean();
+          }
+          if (!existingProduct) {
+            existingProduct = await this.products.findOne({ name: { $regex: new RegExp(`^${m.name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }, unit: m.unit.trim(), isDeleted: false }).session(session).lean();
+          }
+          let autoProduct: any = existingProduct;
+          let wasAutoCreated = false;
+          if (!autoProduct) {
+            // Auto-generate a unique code if none provided
+            const autoCode = m.code?.trim()
+              ? m.code.trim().toUpperCase()
+              : `AUTO-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const created: any[] = await this.products.create([{
+              code: autoCode,
+              name: m.name.trim(),
+              unit: m.unit.trim(),
+              costPrice: line.returnUnitPrice,
+              stock: 0,
+            }], { session });
+            autoProduct = created[0];
+            wasAutoCreated = true;
+          }
+          // Update truck inventory (same as CATALOG path)
+          let inv: any = truck.inventory.find((x: any) => String(x.productId) === String(autoProduct._id));
+          const before = Number(inv?.qty || 0);
+          if (inv) inv.qty = before + line.qty;
+          else truck.inventory.push({ productId: autoProduct._id, qty: line.qty });
+          items.push({
+            lineId,
+            itemType: ReturnItemType.CATALOG,
+            productId: String(autoProduct._id),
+            productCode: autoProduct.code,
+            productName: autoProduct.name,
+            unit: autoProduct.unit,
+            qty: line.qty,
+            previousUnitPrice: line.previousUnitPrice,
+            returnUnitPrice: line.returnUnitPrice,
+            lineReturnAmount: line.lineReturnAmount,
+            priceDifference: line.priceDifference,
+            condition: line.condition,
+            note: line.note,
+            autoCreated: wasAutoCreated,
+          });
+          movementRows.push({
+            productId: autoProduct._id,
+            type: InventoryMovementType.CUSTOMER_RETURN_TO_TRUCK,
+            quantityChange: line.qty,
+            quantityBefore: before,
+            quantityAfter: before + line.qty,
+            destinationType: InventoryLocationType.TRUCK,
+            destinationTruckId: truck._id,
+            referenceType: 'CUSTOMER_RETURN',
+            referenceId: String(returnId),
+            referenceCode: code,
+            createdBy: actorId,
+            returnQuantity: line.qty,
+            previousUnitPrice: line.previousUnitPrice,
+            returnUnitPrice: line.returnUnitPrice,
+            returnAmount: line.lineReturnAmount,
+          });
+          if (wasAutoCreated) {
+            await this.notifications.create([{
+              type: NotificationType.PRODUCT_AUTO_ADDED,
+              title: '⚠️ Sản phẩm mới tự động thêm',
+              message: `Sản phẩm "${autoProduct.name}" (${autoProduct.code}) được tự động tạo từ phiếu hoàn khách hàng. Vui lòng kiểm tra và bổ sung thông tin chi tiết.`,
+              audience: 'ADMIN',
+              entityType: 'PRODUCT',
+              entityId: String(autoProduct._id),
+              entityCode: autoProduct.code,
+              data: { productId: String(autoProduct._id), productCode: autoProduct.code, productName: autoProduct.name, unit: autoProduct.unit, returnCode: code },
+            }], { session });
+          }
+        }
+      }
       await truck.save({ session }); if (movementRows.length) await this.movements.insertMany(movementRows, { session }); const before = Number(customer.debt || 0), after = before - dto.settlement.debtReductionAmount; customer.debt = after; await customer.save({ session });
       const doc: any = (await this.returns.create([{ _id: returnId, code, idempotencyKey: dto.idempotencyKey, customerId: String(customer._id), customerCode: customer.code, customerName: customer.name, customerPhone: customer.phone, destinationTruckId: String(truck._id), destinationTruckCode: truck.code, destinationTruckName: truck.name, destinationTruckLicensePlate: truck.licensePlate, driverId: truck.driverId && String(truck.driverId), driverName: truck.driverName || truck.driver, items, returnAmount: calculated.returnAmount, previousReferenceAmount: calculated.previousReferenceAmount, priceDifferenceAmount: calculated.priceDifferenceAmount, debtReductionAmount: dto.settlement.debtReductionAmount, refundAmount: calculated.refundAmount, refunds: dto.settlement.refunds, customerDebtBefore: before, customerDebtAfter: after, reason: dto.reason, priceAdjustmentReason: dto.priceAdjustmentReason, note: dto.note, status: CustomerReturnStatus.COMPLETED, createdBy: actorId }], { session }))[0];
       if (dto.settlement.debtReductionAmount) await this.ledger.create([{ customerId: customer._id, customerCode: customer.code, type: DebtLedgerType.CUSTOMER_RETURN_DEBT_REDUCTION, direction: DebtLedgerDirection.DECREASE, amount: dto.settlement.debtReductionAmount, previousDebt: before, decreaseAmount: dto.settlement.debtReductionAmount, balanceAfter: after, occurredAt: new Date(), effectiveAt: new Date(), referenceType: 'CUSTOMER_RETURN', referenceId: String(returnId), referenceCode: code, createdBy: actorId }], { session });
