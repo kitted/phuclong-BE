@@ -1,7 +1,16 @@
-import { IsArray, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { ID } from 'src/core/interfaces/id.interface';
+import { ImportStatus } from '../schemas/imports.schema';
 
 export class ImportItemDto {
   @ApiProperty()
@@ -32,10 +41,10 @@ export class CreateImportDto {
   @IsOptional()
   supplierId?: ID | string;
 
-  @ApiProperty({ required: false, enum: ['completed', 'pending', 'cancelled'] })
-  @IsEnum(['completed', 'pending', 'cancelled'])
+  @ApiProperty({ required: false, enum: ImportStatus })
+  @IsEnum(ImportStatus)
   @IsOptional()
-  status?: string;
+  status?: ImportStatus;
 
   @ApiProperty({ required: false })
   @IsString()
@@ -51,4 +60,8 @@ export class CreateImportDto {
   @ValidateNested({ each: true })
   @Type(() => ImportItemDto)
   items: ImportItemDto[];
+}
+export class ChangeImportStatusDto {
+  @IsEnum(ImportStatus) status: ImportStatus;
+  @IsOptional() @IsString() reason?: string;
 }

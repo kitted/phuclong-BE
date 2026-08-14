@@ -28,6 +28,9 @@ import { ReportsModule } from './collection/reports/reports.module';
 import { NotificationsModule } from './collection/notifications/notifications.module';
 import { BackupsModule } from './collection/backups/backups.module';
 import { CustomerReturnsModule } from './collection/customer-returns/customer-returns.module';
+import { GoodsAdvancesModule } from './collection/goods-advances/goods-advances.module';
+import { DailyReportsModule } from './collection/daily-reports/daily-reports.module';
+import { QuickNotesModule } from './collection/quick-notes/quick-notes.module';
 
 @Module({
   imports: [
@@ -53,6 +56,9 @@ import { CustomerReturnsModule } from './collection/customer-returns/customer-re
     NotificationsModule,
     BackupsModule,
     CustomerReturnsModule,
+    GoodsAdvancesModule,
+    DailyReportsModule,
+    QuickNotesModule,
     PublicModule,
     AdminModule,
     RouterModule.register([

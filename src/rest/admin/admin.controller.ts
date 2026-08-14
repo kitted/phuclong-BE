@@ -16,16 +16,29 @@ import { DebtPaymentsModule } from 'src/collection/debt-payments/debt-payments.m
 import { ReportsModule } from 'src/collection/reports/reports.module';
 import { NotificationsModule } from 'src/collection/notifications/notifications.module';
 import { CustomerReturnsModule } from 'src/collection/customer-returns/customer-returns.module';
+import { GoodsAdvancesModule } from 'src/collection/goods-advances/goods-advances.module';
+import { DailyReportsModule } from 'src/collection/daily-reports/daily-reports.module';
+import { QuickNotesModule } from 'src/collection/quick-notes/quick-notes.module';
+import { WebsiteOrdersModule } from 'src/collection/website-orders/website-orders.module';
+import { WebsiteContentsModule } from 'src/collection/website-contents/website-contents.module';
 
 import { UsersController } from './controllers/users';
 import { CategoriesController } from './controllers/categories.controller';
 import { SuppliersController } from './controllers/suppliers.controller';
 import { ProductsController } from './controllers/products.controller';
-import { TrucksController, TruckStockChecksController, TruckInventoryBackupsController } from './controllers/trucks.controller';
+import {
+  TrucksController,
+  TruckStockChecksController,
+  TruckInventoryBackupsController,
+} from './controllers/trucks.controller';
 import { ImportsController } from './controllers/imports.controller';
 import { InvoicesController } from './controllers/invoices.controller';
 import { DashboardController } from './controllers/dashboard.controller';
-import { InventoryController,InventoryStockChecksController,InventoryBackupsController } from './controllers/inventory.controller';
+import {
+  InventoryController,
+  InventoryStockChecksController,
+  InventoryBackupsController,
+} from './controllers/inventory.controller';
 import { CustomersController } from './controllers/customers.controller';
 import { PromotionsController } from './controllers/promotions.controller';
 import { TruckTransfersController } from './controllers/truck-transfers.controller';
@@ -36,7 +49,20 @@ import { AuditLogsController } from './controllers/audit-logs.controller';
 import { ReportsController } from './controllers/reports.controller';
 import { NotificationsController } from './controllers/notifications.controller';
 import { BackupsController } from './controllers/backups.controller';
-import { CustomerReturnsController, TruckUnclassifiedReturnStockController, UnclassifiedReturnStockController } from './controllers/customer-returns.controller';
+import {
+  CustomerReturnsController,
+  TruckUnclassifiedReturnStockController,
+  UnclassifiedReturnStockController,
+} from './controllers/customer-returns.controller';
+import { GoodsAdvancesController } from './controllers/goods-advances.controller';
+import { DailyReportsController } from './controllers/daily-reports.controller';
+import { QuickNotesController } from './controllers/quick-notes.controller';
+import { WebsiteOrdersController } from './controllers/website-orders.controller';
+import { WebsiteContentsController } from './controllers/website-contents.controller';
+import { WebsiteContentCategoriesController } from './controllers/website-content-categories.controller';
+import { WebsiteSettingsController } from './controllers/website-settings.controller';
+import { WebsiteDataController } from './controllers/website-data.controller';
+import { WebsiteProductsController } from './controllers/website-products.controller';
 
 @Module({
   imports: [
@@ -57,6 +83,11 @@ import { CustomerReturnsController, TruckUnclassifiedReturnStockController, Uncl
     ReportsModule,
     NotificationsModule,
     CustomerReturnsModule,
+    GoodsAdvancesModule,
+    DailyReportsModule,
+    QuickNotesModule,
+    WebsiteOrdersModule,
+    WebsiteContentsModule,
   ],
   controllers: [
     UsersController,
@@ -85,6 +116,15 @@ import { CustomerReturnsController, TruckUnclassifiedReturnStockController, Uncl
     CustomerReturnsController,
     TruckUnclassifiedReturnStockController,
     UnclassifiedReturnStockController,
+    GoodsAdvancesController,
+    DailyReportsController,
+    QuickNotesController,
+    WebsiteOrdersController,
+    WebsiteContentsController,
+    WebsiteContentCategoriesController,
+    WebsiteSettingsController,
+    WebsiteDataController,
+    WebsiteProductsController,
   ],
 })
 export class AdminModule {}

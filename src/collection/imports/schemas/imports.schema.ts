@@ -14,6 +14,12 @@ export class ImportItem {
   price: number;
 }
 
+export enum ImportStatus {
+  PENDING = 'PENDING',
+  RECEIVED = 'RECEIVED',
+  RETURNED = 'RETURNED',
+}
+
 export class Imports extends BaseModel {
   @prop({ required: true, unique: true })
   code: string;
@@ -24,8 +30,14 @@ export class Imports extends BaseModel {
   @prop({ ref: () => Suppliers })
   supplierId: Ref<Suppliers>;
 
-  @prop({ default: 'completed', enum: ['completed', 'pending', 'cancelled'] })
-  status: string;
+  @prop({ default: ImportStatus.PENDING, enum: ImportStatus })
+  status: ImportStatus;
+
+  @prop() receivedAt?: Date;
+  @prop() receivedBy?: string;
+  @prop() returnedAt?: Date;
+  @prop() returnedBy?: string;
+  @prop() returnReason?: string;
 
   @prop()
   note?: string;

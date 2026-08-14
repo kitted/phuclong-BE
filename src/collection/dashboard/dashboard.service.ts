@@ -233,7 +233,12 @@ export class DashboardService {
         $expr: { $lte: ['$stock', '$minStock'] },
       }),
       this.imports.aggregate([
-        { $match: { isDeleted: false, status: 'completed' } },
+        {
+          $match: {
+            isDeleted: false,
+            status: { $in: ['RECEIVED', 'completed'] },
+          },
+        },
         { $group: { _id: null, value: { $sum: '$totalAmount' } } },
       ]),
       this.invoices.aggregate([

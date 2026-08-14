@@ -57,6 +57,7 @@ export class CreateProductDto {
   @IsMongoId() // Đảm bảo ID truyền lên đúng định dạng MongoDB ObjectId
   @IsOptional()
   supplierId?: ID | string;
+
 }
 
 // PartialType sẽ kế thừa toàn bộ CreateProductDto và tự động chuyển mọi trường thành Optional

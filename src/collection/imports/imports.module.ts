@@ -6,7 +6,10 @@ import { ImportsService } from './imports.service';
 import { InventoryMovementsModule } from '../inventory/inventory-movements.module';
 
 @Module({
-  imports: [TypegooseModule.forFeature([Imports, Products]), InventoryMovementsModule],
+  imports: [
+    TypegooseModule.forFeature([Imports, Products]),
+    InventoryMovementsModule,
+  ],
   providers: [ImportsService],
   exports: [ImportsService],
 })

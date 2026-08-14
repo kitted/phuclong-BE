@@ -39,4 +39,5 @@ export class Products extends BaseModel {
 
   @prop({ ref: () => Suppliers, required: false, default: null })
   supplierId?: Ref<Suppliers>;
+
 }
