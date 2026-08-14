@@ -65,6 +65,7 @@ export class CustomerInteraction {
 @index({ code: 1 }, { unique: true, partialFilterExpression: { isDeleted: false, code: { $type: 'string' } } })
 export class Customers extends BaseModel {
   @prop() code?: string;
+  @prop() deletedCode?: string;
   @prop({ enum: CustomerCodeStatus, default: CustomerCodeStatus.UNASSIGNED }) codeStatus: CustomerCodeStatus;
   @prop({ type: () => [CustomerCodeChange], default: [] }) codeHistory: CustomerCodeChange[];
   @prop({ required: true }) name: string;

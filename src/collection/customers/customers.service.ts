@@ -94,15 +94,28 @@ export class CustomersService {
     const current: any = await this.model.findOne({ _id: id, isDeleted: false }).select('code').lean();
     if (!current) throw new NotFoundException('Không tìm thấy khách hàng');
     let customer: any;
+    const session = await this.connection.startSession();
     try {
-      customer = await this.model.findOneAndUpdate(
-        { _id: id, isDeleted: false },
-        { $set: { code, codeStatus: CustomerCodeStatus.ASSIGNED }, $push: { codeHistory: { oldCode: current.code, newCode: code, changedBy: actorId, changedAt: new Date(), reason } } },
-        { new: true },
-      );
+      await session.withTransaction(async () => {
+        // Release the code from soft-deleted legacy records. This also works
+        // when the database still has the old global unique index on `code`.
+        await this.model.updateMany(
+          { _id: { $ne: id }, code, isDeleted: true },
+          { $set: { deletedCode: code }, $unset: { code: 1 } },
+          { session },
+        );
+        customer = await this.model.findOneAndUpdate(
+          { _id: id, isDeleted: false },
+          { $set: { code, codeStatus: CustomerCodeStatus.ASSIGNED }, $push: { codeHistory: { oldCode: current.code, newCode: code, changedBy: actorId, changedAt: new Date(), reason } } },
+          { new: true, session },
+        );
+        if (!customer) throw new ConflictException({ code: 'CUSTOMER_STATE_CHANGED', message: 'Trạng thái khách hàng vừa thay đổi, vui lòng thử lại' });
+      });
     } catch (error: any) {
       if (error?.code === 11000) throw new ConflictException({ code: 'CUSTOMER_CODE_ALREADY_EXISTS', message: 'Mã khách hàng đã thuộc khách hàng khác' });
       throw error;
+    } finally {
+      await session.endSession();
     }
     const match = /^KH(\d+)$/.exec(code);
     if (match) await this.counterModel.updateOne({ key: 'CUSTOMER_CODE' }, { $max: { sequence: Number(match[1]) }, $setOnInsert: { key: 'CUSTOMER_CODE' } }, { upsert: true });
@@ -113,12 +126,21 @@ export class CustomersService {
     await this.assertAdminActor(actorId);
     const reason = String(reasonValue || '').trim();
     if (!reason) throw new BadRequestException('Phải nhập lý do xóa khách hàng');
-    const customer: any = await this.model.findOne({ _id: id, isDeleted: false }).select('debt').lean();
+    const customer: any = await this.model.findOne({ _id: id, isDeleted: false }).select('code debt').lean();
     if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
     if (Number(customer.debt || 0) > 0) throw new ConflictException({ code: 'CUSTOMER_HAS_OUTSTANDING_DEBT', message: 'Không thể xóa khách hàng còn công nợ' });
     const deleted = await this.model.findOneAndUpdate(
       { _id: id, isDeleted: false, debt: { $lte: 0 } },
-      { $set: { isDeleted: true, deletedAt: new Date(), deletedBy: actorId, deleteReason: reason } },
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt: new Date(),
+          deletedBy: actorId,
+          deleteReason: reason,
+          deletedCode: customer.code,
+        },
+        $unset: { code: 1 },
+      },
       { new: true },
     );
     if (!deleted) throw new ConflictException({ code: 'CUSTOMER_STATE_CHANGED', message: 'Trạng thái khách hàng vừa thay đổi, vui lòng thử lại' });
@@ -127,7 +149,12 @@ export class CustomersService {
 
   private async assertAdminActor(actorId?: string) {
     if (!actorId) throw new ForbiddenException('Không xác định được người thực hiện');
-    const actor = await this.userModel.exists({ _id: actorId, isDeleted: false, status: UserStatus.ACTIVE, role: RoleEnum.ADMIN });
+    const actor = await this.userModel.exists({
+      _id: actorId,
+      isDeleted: false,
+      status: { $ne: UserStatus.INACTIVE },
+      role: RoleEnum.ADMIN,
+    });
     if (!actor) throw new ForbiddenException('Chỉ quản trị viên đang hoạt động được thực hiện thao tác này');
   }
 
@@ -167,6 +194,57 @@ export class CustomersService {
       data: data.map((customer: any) => ({ ...customer, id: String(customer._id), ...customerStoreProfileFlags(customer), sourceLabel: SOURCE_LABELS[customer.source], segmentLabel: SEGMENT_LABELS[customer.segment], availableDebtLimit: customer.debtLimit > 0 ? Math.max(0, customer.debtLimit - (customer.debt || 0)) : 0, debtWarning: (customer.debtLimit || 0) > 0 && (customer.debt || 0) >= customer.debtLimit })),
       meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) },
     };
+  }
+
+  async findDeleted(query: CustomerQueryDto, actorId?: string): Promise<any> {
+    await this.assertAdminActor(actorId);
+    const page = this.page(query.page, 1);
+    const limit = this.page(query.limit, 20, 100);
+    const filter: any = { isDeleted: true };
+    if (query.search?.trim()) {
+      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = ['code', 'deletedCode', 'name', 'phone', 'phones'].map(
+        (field) => ({ [field]: { $regex: escaped, $options: 'i' } }),
+      );
+    }
+    const [rows, totalItems] = await Promise.all([
+      this.model.find(filter).select('code deletedCode codeStatus name phone phones email address source segment debt debtLimit note deleteReason deletedAt deletedBy createdAt updatedAt').sort({ deletedAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      this.model.countDocuments(filter),
+    ]);
+    return {
+      data: rows.map((row: any) => ({ ...row, id: String(row._id), displayCode: row.deletedCode || row.code || null })),
+      meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) },
+    };
+  }
+
+  async findDeletedOne(id: string, actorId?: string): Promise<any> {
+    await this.assertAdminActor(actorId);
+    const row: any = await this.model.findOne({ _id: id, isDeleted: true }).lean();
+    if (!row) throw new NotFoundException('Không tìm thấy khách hàng đã xóa');
+    return { data: { ...row, id: String(row._id), displayCode: row.deletedCode || row.code || null } };
+  }
+
+  async restoreCustomer(id: string, actorId?: string): Promise<any> {
+    await this.assertAdminActor(actorId);
+    const deleted: any = await this.model.findOne({ _id: id, isDeleted: true }).select('code deletedCode').lean();
+    if (!deleted) throw new NotFoundException('Không tìm thấy khách hàng đã xóa');
+    const desiredCode = deleted.deletedCode || deleted.code;
+    const codeAvailable = desiredCode
+      ? !(await this.model.exists({ _id: { $ne: id }, code: desiredCode, isDeleted: false }))
+      : false;
+    const set: any = {
+      isDeleted: false,
+      deletedAt: null,
+      deletedBy: null,
+      deleteReason: null,
+      codeStatus: codeAvailable ? CustomerCodeStatus.ASSIGNED : CustomerCodeStatus.UNASSIGNED,
+    };
+    if (codeAvailable) set.code = desiredCode;
+    const update: any = { $set: set };
+    if (!codeAvailable) update.$unset = { code: 1 };
+    const restored = await this.model.findOneAndUpdate({ _id: id, isDeleted: true }, update, { new: true });
+    if (!restored) throw new ConflictException({ code: 'CUSTOMER_STATE_CHANGED', message: 'Trạng thái khách hàng vừa thay đổi, vui lòng thử lại' });
+    return { data: restored, meta: { codeRestored: codeAvailable, previousCode: desiredCode || null } };
   }
 
   async summary() {

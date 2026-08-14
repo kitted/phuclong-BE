@@ -18,6 +18,12 @@ import { AdminOnly } from '../decorators/admin-only';
 export class CustomersController {
   constructor(private readonly service: CustomersService, private readonly activations: PromotionActivationsService, private readonly debtPayments: DebtPaymentsService) {}
 
+  private actorId(request: AuthRequest): string {
+    const user: any = request.user;
+    const doc = user?._doc || user;
+    return String(doc?.id || doc?._id || doc?.sub || '');
+  }
+
   @Get() @ApiOperation({ summary: 'Search and filter customers' })
   findAll(@Query() query: CustomerQueryDto): Promise<any> { return this.service.findAll(query); }
 
@@ -103,8 +109,22 @@ export class CustomersController {
 
   @Patch(':id/code') @AdminOnly() @ApiOperation({ summary: 'Assign or change customer code without rewriting historical snapshots' })
   updateCode(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateCustomerCodeDto, @Req() request: AuthRequest) {
-    const user: any = request.user; const doc = user?._doc || user;
-    return this.service.updateCode(String(id), dto.code, dto.reason, String(doc?.id || doc?._id || ''));
+    return this.service.updateCode(String(id), dto.code, dto.reason, this.actorId(request));
+  }
+
+  @Get('deleted/list') @AdminOnly() @ApiOperation({ summary: 'List soft-deleted customers' })
+  deleted(@Query() query: CustomerQueryDto, @Req() request: AuthRequest): Promise<any> {
+    return this.service.findDeleted(query, this.actorId(request));
+  }
+
+  @Get('deleted/:id') @AdminOnly() @ApiOperation({ summary: 'Get a soft-deleted customer' })
+  deletedOne(@Param('id', ParseIdPipe) id: ID, @Req() request: AuthRequest): Promise<any> {
+    return this.service.findDeletedOne(String(id), this.actorId(request));
+  }
+
+  @Post(':id/restore') @AdminOnly() @ApiOperation({ summary: 'Restore a soft-deleted customer' })
+  restore(@Param('id', ParseIdPipe) id: ID, @Req() request: AuthRequest): Promise<any> {
+    return this.service.restoreCustomer(String(id), this.actorId(request));
   }
 
   @Get(':id') @ApiOperation({ summary: 'Get customer 360 profile' })
@@ -118,8 +138,7 @@ export class CustomersController {
 
   @Delete(':id') @AdminOnly() @ApiOperation({ summary: 'Soft-delete a debt-free customer' })
   remove(@Param('id', ParseIdPipe) id: ID, @Body() dto: DeleteCustomerDto, @Req() request: AuthRequest) {
-    const user: any = request.user; const doc = user?._doc || user;
-    return this.service.deleteCustomer(String(id), dto.reason, String(doc?.id || doc?._id || ''));
+    return this.service.deleteCustomer(String(id), dto.reason, this.actorId(request));
   }
 
   @Post(':id/interactions') @AdminOnly() @ApiOperation({ summary: 'Record customer interaction' })
