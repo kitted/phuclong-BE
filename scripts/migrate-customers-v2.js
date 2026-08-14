@@ -20,7 +20,15 @@ async function main() {
     await customers.dropIndex(codeIndex.name);
   }
   await customers.updateMany(
-    { code: { $type: 'string' } },
+    { isDeleted: true, code: { $type: 'string' }, deletedCode: { $exists: false } },
+    [{ $set: { deletedCode: '$code' } }],
+  );
+  await customers.updateMany(
+    { isDeleted: true },
+    { $unset: { code: 1 }, $set: { codeStatus: 'UNASSIGNED' } },
+  );
+  await customers.updateMany(
+    { isDeleted: { $ne: true }, code: { $type: 'string' } },
     { $set: { codeStatus: 'ASSIGNED' } },
   );
   await customers.updateMany(
