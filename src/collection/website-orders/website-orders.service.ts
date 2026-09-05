@@ -1,7 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectModel } from 'nestjs-typegoose';
 import { ReturnModelType } from '@typegoose/typegoose';
 import { createHash, randomBytes } from 'crypto';
+import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
 import { Types } from 'mongoose';
 import { Products } from '../products/schemas/products.schema';
 import { Categories } from '../categories/schemas/categories.schema';
@@ -11,7 +12,9 @@ import {
   AssignWebsiteOrderDto,
   ChangeWebsiteOrderStatusDto,
   ConvertWebsiteOrderDto,
+  CreateWebsiteProductDto,
   CreateWebsiteOrderDto,
+  UpdateWebsiteProductDto,
   WebsiteOrderAdminQueryDto,
 } from './dtos/website-orders.dto';
 import {
@@ -133,6 +136,8 @@ export class WebsiteOrdersService {
     }
     if (q.mapped === 'true') filter.inventoryProductId = { $exists: true, $ne: null };
     if (q.mapped === 'false') filter.$and = [{ $or: [{ inventoryProductId: null }, { inventoryProductId: { $exists: false } }] }];
+    if (q.active === 'true') filter.isActive = true;
+    if (q.active === 'false') filter.isActive = false;
     const [data, total] = await Promise.all([
       this.websiteProducts.find(filter).sort({ name: 1 }).skip((page - 1) * limit).limit(limit).lean(),
       this.websiteProducts.countDocuments(filter),
@@ -140,9 +145,98 @@ export class WebsiteOrdersService {
     return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
-  async mapInventoryProduct(id: string, inventoryProductId: string): Promise<any> {
-    const inventoryProduct = await this.products.findOne({ _id: inventoryProductId, isDeleted: false }).select('_id code name unit').lean();
-    if (!inventoryProduct) throw new BadRequestException('Hàng hóa BO không tồn tại');
+  async adminProductCategories(): Promise<any> {
+    const data = await this.websiteCategories.find({ isDeleted: false }).sort({ sortOrder: 1, name: 1 }).lean();
+    return { data };
+  }
+
+  async adminProduct(id: string): Promise<any> {
+    const data = await this.websiteProducts.findOne({ _id: id, isDeleted: false }).lean();
+    if (!data) throw new NotFoundException('Không tìm thấy sản phẩm website');
+    return { data };
+  }
+
+  private uploadWebsiteImageBuffer(buffer: Buffer): Promise<UploadApiResponse> {
+    return new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream({ folder: 'phuclong/website-products', resource_type: 'image', overwrite: false, transformation: [{ width: 1800, height: 1800, crop: 'limit', quality: 'auto', fetch_format: 'auto' }] }, (error, result) => error || !result ? reject(error || new Error('Cloudinary không trả kết quả upload')) : resolve(result));
+      stream.end(buffer);
+    });
+  }
+
+  async uploadWebsiteProductImage(file: any): Promise<any> {
+    if (!file?.buffer) throw new BadRequestException('Vui lòng chọn ảnh sản phẩm website');
+    const cloud_name = process.env.CLOUDINARY_CLOUD_NAME, api_key = process.env.CLOUDINARY_API_KEY, api_secret = process.env.CLOUDINARY_API_SECRET;
+    if (!cloud_name || !api_key || !api_secret) throw new BadRequestException('Cloudinary chưa được cấu hình trên backend');
+    cloudinary.config({ cloud_name, api_key, api_secret, secure: true });
+    const uploaded = await this.uploadWebsiteImageBuffer(file.buffer);
+    return { data: { url: uploaded.secure_url, publicId: uploaded.public_id, width: uploaded.width, height: uploaded.height } };
+  }
+
+  private websiteProductSlug(value: string): string {
+    const slug = String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    if (!slug) throw new BadRequestException('Slug sản phẩm website không hợp lệ');
+    return slug;
+  }
+
+  private sanitizeWebsiteProductHtml(value?: string): string | undefined {
+    if (value === undefined) return undefined;
+    return String(value).replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '').replace(/<\/?(script|style|iframe|object|embed)[^>]*>/gi, '').replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '').replace(/javascript\s*:/gi, '');
+  }
+
+  private async ensureWebsiteProductCategory(categoryId?: string | null): Promise<void> {
+    if (!categoryId) return;
+    if (!(await this.websiteCategories.exists({ _id: categoryId, isDeleted: false }))) throw new BadRequestException('Danh mục sản phẩm website không tồn tại');
+  }
+
+  private websiteProductChanges(dto: CreateWebsiteProductDto | UpdateWebsiteProductDto): any {
+    const changes: any = { ...dto };
+    if (dto.code !== undefined) changes.code = dto.code.trim();
+    if (dto.name !== undefined) changes.name = dto.name.trim();
+    if (dto.slug !== undefined) changes.slug = this.websiteProductSlug(dto.slug);
+    if (dto.unit !== undefined) changes.unit = dto.unit.trim();
+    if (dto.shortDescription !== undefined) changes.shortDescription = dto.shortDescription.trim();
+    if (dto.descriptionHtml !== undefined) changes.descriptionHtml = this.sanitizeWebsiteProductHtml(dto.descriptionHtml);
+    if (dto.imageUrls !== undefined) changes.imageUrls = dto.imageUrls.map((url) => url.trim()).filter(Boolean);
+    return changes;
+  }
+
+  private websiteProductWriteError(error: any): never {
+    if (error?.code === 11000) throw new ConflictException(`${error?.keyPattern?.code ? 'Mã sản phẩm' : 'Slug'} website đã tồn tại`);
+    throw error;
+  }
+
+  async createWebsiteProduct(dto: CreateWebsiteProductDto, actorId: string): Promise<any> {
+    await this.ensureWebsiteProductCategory(dto.categoryId);
+    try {
+      const data = await this.websiteProducts.create({ ...this.websiteProductChanges(dto), isActive: dto.isActive !== false, createdBy: actorId });
+      return { data };
+    } catch (error) {
+      this.websiteProductWriteError(error);
+    }
+  }
+
+  async updateWebsiteProduct(id: string, dto: UpdateWebsiteProductDto, actorId: string): Promise<any> {
+    await this.ensureWebsiteProductCategory(dto.categoryId);
+    try {
+      const data = await this.websiteProducts.findOneAndUpdate({ _id: id, isDeleted: false }, { $set: { ...this.websiteProductChanges(dto), updatedBy: actorId } }, { new: true });
+      if (!data) throw new NotFoundException('Không tìm thấy sản phẩm website');
+      return { data };
+    } catch (error) {
+      this.websiteProductWriteError(error);
+    }
+  }
+
+  async removeWebsiteProduct(id: string, actorId: string): Promise<any> {
+    const data = await this.websiteProducts.findOneAndUpdate({ _id: id, isDeleted: false }, { $set: { isDeleted: true, isActive: false, deletedAt: new Date(), deletedBy: actorId } }, { new: true });
+    if (!data) throw new NotFoundException('Không tìm thấy sản phẩm website');
+    return { data: { id, deleted: true } };
+  }
+
+  async mapInventoryProduct(id: string, inventoryProductId: string | null): Promise<any> {
+    const inventoryProduct = inventoryProductId
+      ? await this.products.findOne({ _id: inventoryProductId, isDeleted: false }).select('_id code name unit').lean()
+      : null;
+    if (inventoryProductId && !inventoryProduct) throw new BadRequestException('Hàng hóa BO không tồn tại');
     const doc = await this.websiteProducts.findOneAndUpdate(
       { _id: id, isDeleted: false },
       { $set: { inventoryProductId } },

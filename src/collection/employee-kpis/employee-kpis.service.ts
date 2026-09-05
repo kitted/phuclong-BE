@@ -32,6 +32,7 @@ import {
 import { Products } from '../products/schemas/products.schema';
 import { Categories } from '../categories/schemas/categories.schema';
 import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
+import { monthlyKpiCycle } from './kpi-cycle';
 
 @Injectable()
 export class EmployeeKpisService {
@@ -163,7 +164,11 @@ export class EmployeeKpisService {
       throw new BadRequestException(
         'Nhân viên không tồn tại hoặc không hoạt động',
       );
-    const { start, end } = this.range(dto.from, dto.to);
+    const cycleType = dto.cycleType || 'CUSTOM_MONTHLY';
+    const cycle = cycleType === 'CUSTOM_MONTHLY' ? monthlyKpiCycle(dto.from) : null;
+    if (cycle && (dto.from !== cycle.fromText || dto.to !== cycle.toText))
+      throw new BadRequestException(`Chu kỳ KPI phải từ ${cycle.fromText} đến ${cycle.toText}`);
+    const { start, end } = cycle ? { start: cycle.from, end: cycle.to } : this.range(dto.from, dto.to);
     await this.validateTargets(
       dto.targets,
       start,
@@ -178,8 +183,8 @@ export class EmployeeKpisService {
     );
     const doc = await this.model.create({
       ...dto,
-      cycleType: dto.cycleType || 'FIXED_RANGE',
-      ...(dto.cycleType === 'CUSTOM_MONTHLY'
+      cycleType,
+      ...(cycleType === 'CUSTOM_MONTHLY'
         ? { startDay: 10, endDay: 9 }
         : {}),
       name:
@@ -247,14 +252,19 @@ export class EmployeeKpisService {
       throw new BadRequestException('Không thể sửa KPI đã hủy');
     const from: any = dto.from || existing.from,
       to: any = dto.to || existing.to;
-    const { start, end } = this.range(from, to);
+    const cycleType = dto.cycleType || existing.cycleType || 'FIXED_RANGE';
+    const normalizeCycle = cycleType === 'CUSTOM_MONTHLY' && (dto.cycleType === 'CUSTOM_MONTHLY' || dto.from !== undefined || dto.to !== undefined);
+    const cycle = normalizeCycle ? monthlyKpiCycle(dto.from || from) : null;
+    if (cycle && ((dto.from && dto.from !== cycle.fromText) || (dto.to && dto.to !== cycle.toText)))
+      throw new BadRequestException(`Chu kỳ KPI phải từ ${cycle.fromText} đến ${cycle.toText}`);
+    const { start, end } = cycle ? { start: cycle.from, end: cycle.to } : this.range(from, to);
     await this.validateTargets(
       dto.targets || existing.targets,
       start,
       end,
       dto.status || existing.status,
     );
-    Object.assign(existing, dto, { from: start, to: end });
+    Object.assign(existing, dto, { cycleType, ...(cycle ? { startDay: 10, endDay: 9 } : {}), from: start, to: end });
     await existing.save();
     return { data: existing };
   }

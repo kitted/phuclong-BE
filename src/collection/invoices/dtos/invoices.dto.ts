@@ -29,6 +29,8 @@ export class NewInvoiceCustomerDto {
   @ApiPropertyOptional() @IsOptional() @IsString() phone?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() address?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() latitude?: number;
+  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() longitude?: number;
 }
 export class GiftSelectionItemDto {
   @ApiProperty() @IsMongoId() productId: string;

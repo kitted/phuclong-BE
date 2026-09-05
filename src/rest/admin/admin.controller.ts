@@ -63,6 +63,8 @@ import { WebsiteContentCategoriesController } from './controllers/website-conten
 import { WebsiteSettingsController } from './controllers/website-settings.controller';
 import { WebsiteDataController } from './controllers/website-data.controller';
 import { WebsiteProductsController } from './controllers/website-products.controller';
+import { LeadsModule } from 'src/collection/leads/leads.module';
+import { LeadsController } from './controllers/leads.controller';
 
 @Module({
   imports: [
@@ -88,6 +90,7 @@ import { WebsiteProductsController } from './controllers/website-products.contro
     QuickNotesModule,
     WebsiteOrdersModule,
     WebsiteContentsModule,
+    LeadsModule,
   ],
   controllers: [
     UsersController,
@@ -125,6 +128,7 @@ import { WebsiteProductsController } from './controllers/website-products.contro
     WebsiteSettingsController,
     WebsiteDataController,
     WebsiteProductsController,
+    LeadsController,
   ],
 })
 export class AdminModule {}

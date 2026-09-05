@@ -1,10 +1,25 @@
-import { Body, Delete, Get, Param, Post, Put, Query, Res, StreamableFile } from '@nestjs/common';
+import {
+  Body,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  Query,
+  Res,
+  StreamableFile,
+} from '@nestjs/common';
 import { ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { ProductsService } from 'src/collection/products/products.service';
-import { CreateProductDto, ImportProductsDto, ProductListQueryDto, UpdateProductDto } from 'src/collection/products/dtos/products.dto';
+import {
+  CreateProductDto,
+  ImportProductsDto,
+  ProductListQueryDto,
+  UpdateProductDto,
+} from 'src/collection/products/dtos/products.dto';
 import { Response } from 'express';
 import { AdminOnly } from '../decorators/admin-only';
 
@@ -26,12 +41,15 @@ export class ProductsController {
   }
 
   @ApiOperation({ summary: 'Export all products to XLSX' })
-  @ApiProduces('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @ApiProduces(
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
   @Get('export')
   async export(@Res({ passthrough: true }) response: Response) {
     const file = await this.service.exportExcel();
     response.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="products-${new Date().toISOString().slice(0, 10)}.xlsx"`,
     });
     return new StreamableFile(file);
@@ -44,6 +62,29 @@ export class ProductsController {
     return this.service.importRows(dto.rows);
   }
 
+  @ApiOperation({ summary: 'Preview product import without changing data' })
+  @Post('import/preview')
+  @AdminOnly()
+  previewImport(@Body() dto: ImportProductsDto) {
+    return this.service.previewImportRows(dto.rows);
+  }
+
+  @ApiOperation({ summary: 'Download the guided product import template' })
+  @ApiProduces(
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+  @Get('import-template')
+  async importTemplate(@Res({ passthrough: true }) response: Response) {
+    const file = await this.service.importTemplate();
+    response.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition':
+        'attachment; filename="product-import-template.xlsx"',
+    });
+    return new StreamableFile(file);
+  }
+
   @ApiOperation({ summary: 'Get product by ID' })
   @Get(':id')
   async findOne(@Param('id', ParseIdPipe) id: ID) {
@@ -53,7 +94,10 @@ export class ProductsController {
   @ApiOperation({ summary: 'Update product' })
   @Put(':id')
   @AdminOnly()
-  async update(@Param('id', ParseIdPipe) id: ID, @Body() dto: UpdateProductDto) {
+  async update(
+    @Param('id', ParseIdPipe) id: ID,
+    @Body() dto: UpdateProductDto,
+  ) {
     return await this.service.update(id, dto);
   }
 

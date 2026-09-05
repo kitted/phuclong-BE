@@ -1,13 +1,18 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayUnique,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsEmail,
   IsEnum,
   IsInt,
   IsMongoId,
+  IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
+  IsUrl,
   MaxLength,
   Min,
   ValidateNested,
@@ -73,5 +78,31 @@ export class ConvertWebsiteOrderDto {
 }
 
 export class MapWebsiteProductDto {
-  @IsMongoId() inventoryProductId: string;
+  @IsOptional() @IsMongoId() inventoryProductId?: string | null;
+}
+
+export class CreateWebsiteProductDto {
+  @IsString() @IsNotEmpty() @MaxLength(100) code: string;
+  @IsString() @IsNotEmpty() @MaxLength(250) name: string;
+  @IsString() @IsNotEmpty() @MaxLength(250) slug: string;
+  @IsOptional() @IsMongoId() categoryId?: string | null;
+  @IsOptional() @IsString() @MaxLength(100) unit?: string;
+  @IsNumber() @Min(0) sellPrice: number;
+  @IsOptional() @IsString() @MaxLength(1000) shortDescription?: string;
+  @IsOptional() @IsString() @MaxLength(200000) descriptionHtml?: string;
+  @IsOptional() @IsArray() @ArrayUnique() @IsUrl({ require_protocol: true }, { each: true }) imageUrls?: string[];
+  @IsOptional() @IsBoolean() isActive?: boolean;
+}
+
+export class UpdateWebsiteProductDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(100) code?: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(250) name?: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(250) slug?: string;
+  @IsOptional() @IsMongoId() categoryId?: string | null;
+  @IsOptional() @IsString() @MaxLength(100) unit?: string;
+  @IsOptional() @IsNumber() @Min(0) sellPrice?: number;
+  @IsOptional() @IsString() @MaxLength(1000) shortDescription?: string;
+  @IsOptional() @IsString() @MaxLength(200000) descriptionHtml?: string;
+  @IsOptional() @IsArray() @ArrayUnique() @IsUrl({ require_protocol: true }, { each: true }) imageUrls?: string[];
+  @IsOptional() @IsBoolean() isActive?: boolean;
 }

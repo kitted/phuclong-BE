@@ -69,6 +69,7 @@ import {
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/schemas/notifications.schema';
 import * as ExcelJS from 'exceljs';
+import { LeadsService } from '../leads/leads.service';
 
 type Actor = { id?: string; role?: RoleEnum };
 
@@ -114,12 +115,13 @@ export function calculateInvoiceDebtAllocation(
 }
 
 export function canViewAllCompanyInvoices(user: {
-  role?: RoleEnum;
+  role?: RoleEnum | string;
   canViewAllInvoices?: boolean;
 }) {
+  const role = String(user.role || '').toLowerCase();
   return (
-    user.role === RoleEnum.ADMIN ||
-    (user.role === RoleEnum.STAFF && user.canViewAllInvoices === true)
+    role === RoleEnum.ADMIN ||
+    (role === RoleEnum.STAFF && user.canViewAllInvoices === true)
   );
 }
 
@@ -162,8 +164,29 @@ export class InvoicesService {
     private readonly ruleEngine: PromotionRuleEngineService,
     private readonly activations: PromotionActivationsService,
     private readonly notifications: NotificationsService,
+    private readonly leadsService: LeadsService,
     @Inject(getConnectionToken()) private readonly connection: Connection,
   ) {}
+
+  private applyInvoicePeriod(filter: any, query: InvoiceQueryDto) {
+    if (!query.from && !query.to) return;
+    const range: any = {};
+    if (query.from) range.$gte = vietnamDateBoundary(query.from, false);
+    if (query.to) range.$lte = vietnamDateBoundary(query.to, true);
+    // Current documents use `date`; very old documents may only have
+    // createdAt. Keep the indexed current path and use createdAt only as a
+    // fallback so exports do not silently lose historical invoices.
+    filter.$and = [
+      ...(filter.$and || []),
+      {
+        $or: [
+          { date: range },
+          { date: { $exists: false }, createdAt: range },
+          { date: null, createdAt: range },
+        ],
+      },
+    ];
+  }
 
   private mergeItems(items: Array<{ productId: string; qty: number }>) {
     if (!Array.isArray(items) || !items.length)
@@ -871,6 +894,15 @@ export class InvoicesService {
             { session },
           )
         )[0];
+        if (dto.newCustomer && customer) {
+          await this.leadsService.promoteForInvoice(
+            dto.newCustomer,
+            String(customer._id),
+            String(invoice._id),
+            { id: String(salesperson._id), name: salesperson.fullName || salesperson.username },
+            session,
+          );
+        }
         const activation: any =
           giftApplication && customer
             ? await this.activations.createForInvoice(
@@ -1484,18 +1516,16 @@ export class InvoicesService {
     actor: Actor = {},
   ): Promise<any> {
     const filter: any = {
-      isDeleted: false,
+      // Legacy invoices may not have isDeleted/status yet. Only records that
+      // are explicitly deleted or reversed must be excluded.
+      isDeleted: { $ne: true },
       status: { $ne: InvoiceStatus.REVERSED },
     };
     const access = await this.resolveInvoiceReadScope(actor);
     if (!access.canViewAll) filter.salespersonId = access.id;
     else if (query.salespersonId) filter.salespersonId = query.salespersonId;
     if (query.paymentStatus) filter.paymentStatus = query.paymentStatus;
-    if (query.from || query.to) {
-      filter.date = {};
-      if (query.from) filter.date.$gte = vietnamDateBoundary(query.from, false);
-      if (query.to) filter.date.$lte = vietnamDateBoundary(query.to, true);
-    }
+    this.applyInvoicePeriod(filter, query);
     if (query.search?.trim()) {
       const escaped = query.search
         .trim()
@@ -1591,8 +1621,10 @@ export class InvoicesService {
     actor: Actor,
   ): Promise<{ invoiceFilter: any; receiptFilter: any }> {
     const access = await this.resolveInvoiceReadScope(actor);
-    const invoiceFilter: any = { isDeleted: false };
-    const receiptFilter: any = { isDeleted: false };
+    // Keep the timeline/export compatible with historical documents created
+    // before the soft-delete field was introduced.
+    const invoiceFilter: any = { isDeleted: { $ne: true } };
+    const receiptFilter: any = { isDeleted: { $ne: true } };
     const salespersonId = access.canViewAll ? query.salespersonId : access.id;
     if (salespersonId) {
       invoiceFilter.salespersonId = salespersonId;
@@ -1602,18 +1634,8 @@ export class InvoicesService {
       invoiceFilter.paymentStatus = query.paymentStatus;
       receiptFilter._id = { $exists: false };
     }
-    if (query.from || query.to) {
-      invoiceFilter.date = {};
-      receiptFilter.date = {};
-      if (query.from) {
-        invoiceFilter.date.$gte = vietnamDateBoundary(query.from, false);
-        receiptFilter.date.$gte = invoiceFilter.date.$gte;
-      }
-      if (query.to) {
-        invoiceFilter.date.$lte = vietnamDateBoundary(query.to, true);
-        receiptFilter.date.$lte = invoiceFilter.date.$lte;
-      }
-    }
+    this.applyInvoicePeriod(invoiceFilter, query);
+    this.applyInvoicePeriod(receiptFilter, query);
     if (query.search?.trim()) {
       const escaped = query.search
         .trim()
