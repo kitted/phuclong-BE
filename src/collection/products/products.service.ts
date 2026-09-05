@@ -13,8 +13,10 @@ import {
 } from './dtos/products.dto';
 import { ID } from 'src/core/interfaces/id.interface';
 import { Categories } from '../categories/schemas/categories.schema';
+import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 import * as ExcelJS from 'exceljs';
 import { excelValue, normalizeExcelRow } from '../../core/excel-import';
+import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
 
 export function normalizeProductCode(value: unknown): string {
   return String(value ?? '')
@@ -103,7 +105,24 @@ export class ProductsService {
     private readonly model: ReturnModelType<typeof Products>,
     @InjectModel(Categories)
     private readonly categoryModel: ReturnModelType<typeof Categories>,
+    @InjectModel(WebsiteProducts)
+    private readonly websiteProductModel: ReturnModelType<typeof WebsiteProducts>,
   ) {}
+
+  private async withProductImages(products: any[]): Promise<any[]> {
+    if (!products.length) return products;
+    const ids = products.map((item) => String(item._id || item.id));
+    const linked = await this.websiteProductModel.find({ isDeleted: { $ne: true }, inventoryProductId: { $in: ids } }).select('inventoryProductId imageUrls').lean();
+    const linkedByProduct = new Map<string, any>(linked.map((item: any) => [String(item.inventoryProductId), item] as [string, any]));
+    return products.map((product) => {
+      const websiteProduct = linkedByProduct.get(String(product._id || product.id));
+      return {
+        ...product,
+        websiteProductId: product.websiteProductId || (websiteProduct?._id ? String(websiteProduct._id) : undefined),
+        imageUrl: product.imageUrl || (websiteProduct?.imageUrls || []).find(Boolean) || undefined,
+      };
+    });
+  }
 
   async create(dto: CreateProductDto) {
     const code = normalizeProductCode(dto.code);
@@ -143,8 +162,9 @@ export class ProductsService {
         .lean(),
       this.model.countDocuments(filter),
     ]);
+    const productsWithImages = await this.withProductImages(products as any[]);
     return {
-      data: products.map((product: any) => ({
+      data: productsWithImages.map((product: any) => ({
         ...product,
         id: String(product._id),
         category: product.categoryId
@@ -169,7 +189,8 @@ export class ProductsService {
       .populate('categoryId', 'name')
       .populate('supplierId', 'name');
     if (!doc) throw new NotFoundException('Không tìm thấy sản phẩm');
-    return doc;
+    const [withImage] = await this.withProductImages([doc.toObject()]);
+    return withImage;
   }
 
   async update(id: ID | string, dto: UpdateProductDto) {
@@ -191,6 +212,27 @@ export class ProductsService {
     );
     if (!doc) throw new NotFoundException('Không tìm thấy sản phẩm');
     return doc;
+  }
+
+  private configureCloudinary(): void {
+    const { CLOUDINARY_CLOUD_NAME: cloud_name, CLOUDINARY_API_KEY: api_key, CLOUDINARY_API_SECRET: api_secret } = process.env;
+    if (!cloud_name || !api_key || !api_secret) throw new BadRequestException('Cloudinary chưa được cấu hình trên backend');
+    cloudinary.config({ cloud_name, api_key, api_secret, secure: true });
+  }
+  private uploadImageBuffer(buffer: Buffer, folder: string): Promise<UploadApiResponse> {
+    return new Promise((resolve, reject) => { const stream = cloudinary.uploader.upload_stream({ folder, resource_type: 'image', transformation: [{ width: 1200, height: 1200, crop: 'limit', quality: 'auto', fetch_format: 'auto' }] }, (error, result) => error || !result ? reject(error || new Error('Không tải được ảnh')) : resolve(result)); stream.end(buffer); });
+  }
+  async uploadImage(id: ID | string, file: any): Promise<any> {
+    if (!file?.buffer) throw new BadRequestException('Vui lòng chọn ảnh sản phẩm');
+    if (file.size > 5 * 1024 * 1024) throw new BadRequestException('Ảnh sản phẩm không được vượt quá 5 MB');
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) throw new BadRequestException('Chỉ hỗ trợ ảnh JPEG, PNG hoặc WebP');
+    const product: any = await this.model.findOne({ _id: id, isDeleted: false });
+    if (!product) throw new NotFoundException('Không tìm thấy sản phẩm');
+    this.configureCloudinary();
+    const uploaded = await this.uploadImageBuffer(file.buffer, `products/${String(id)}`);
+    product.imageUrl = uploaded.secure_url;
+    await product.save();
+    return { data: await this.withProductImages([product.toObject()]).then(([data]) => data) };
   }
 
   async remove(id: ID | string) {

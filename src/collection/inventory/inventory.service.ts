@@ -14,11 +14,13 @@ import {
   InventorySummaryQueryDto,
 } from './dtos/inventory.dto';
 import { InventoryStatus, resolveInventoryStatus } from './inventory-status';
+import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 
 type InventoryRow = {
   productId: string;
   productCode: string;
   productName: string;
+  imageUrl?: string;
   category: { id: string; name: string } | null;
   unit: string;
   warehouseQuantity: number;
@@ -37,6 +39,8 @@ export class InventoryService {
   constructor(
     @InjectModel(Products)
     private readonly productModel: ReturnModelType<typeof Products>,
+    @InjectModel(WebsiteProducts)
+    private readonly websiteProductModel: ReturnModelType<typeof WebsiteProducts>,
     @InjectModel(Trucks)
     private readonly truckModel: ReturnModelType<typeof Trucks>,
     @InjectModel(InventoryMovements)
@@ -66,6 +70,21 @@ export class InventoryService {
         { $group: { _id: '$inventory.productId', quantity: { $sum: '$inventory.qty' } } },
       ]),
     ]);
+    const linkedProducts = products.length
+      ? await this.websiteProductModel
+          .find({
+            isDeleted: { $ne: true },
+            inventoryProductId: { $in: products.map((product: any) => product._id) },
+          })
+          .select('inventoryProductId imageUrls')
+          .lean()
+      : [];
+    const websiteImages = new Map(
+      linkedProducts.map((product: any) => [
+        String(product.inventoryProductId),
+        (product.imageUrls || []).find(Boolean),
+      ])
+    );
     const totals = new Map(truckTotals.map((item) => [String(item._id), Number(item.quantity) || 0]));
 
     return products.map((product: any) => {
@@ -80,6 +99,7 @@ export class InventoryService {
         productId: String(product._id),
         productCode: product.code,
         productName: product.name,
+        imageUrl: product.imageUrl || websiteImages.get(String(product._id)) || undefined,
         category,
         unit: product.unit || '',
         warehouseQuantity,

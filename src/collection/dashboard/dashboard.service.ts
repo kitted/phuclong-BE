@@ -44,11 +44,14 @@ import {
 } from './dtos/dashboard.dto';
 import { resolveReportPeriod } from './report-period';
 import { RoleEnum } from '../users/interfaces/role.enum';
+import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 export type DashboardActor = { id?: string; role?: RoleEnum };
 @Injectable()
 export class DashboardService {
   constructor(
     @InjectModel(Products) private products: ReturnModelType<typeof Products>,
+    @InjectModel(WebsiteProducts)
+    private websiteProducts: ReturnModelType<typeof WebsiteProducts>,
     @InjectModel(Imports) private imports: ReturnModelType<typeof Imports>,
     @InjectModel(Invoices) private invoices: ReturnModelType<typeof Invoices>,
     @InjectModel(Trucks) private trucksModel: ReturnModelType<typeof Trucks>,
@@ -486,7 +489,7 @@ export class DashboardService {
       await Promise.all([
         this.customers
           .find({ isDeleted: false })
-          .select('code name phone debt debtLimit')
+          .select('code name phone debt debtLimit storefrontImage')
           .sort({ debt: -1 })
           .lean(),
         this.invoices.countDocuments({
@@ -530,6 +533,7 @@ export class DashboardService {
             customerCode: item.code,
             customerName: item.name,
             phone: item.phone,
+            storefrontImage: item.storefrontImage,
             debt: item.debt,
             debtLimit: item.debtLimit,
             exceededAmount: Math.max(0, item.debt - (item.debtLimit || 0)),
@@ -615,6 +619,33 @@ export class DashboardService {
           entry.grossProfit = entry.netRevenue - entry.cogs;
           map.set(key, entry);
         }
+    const productIds = [...map.keys()].filter((id) => id && id !== 'undefined');
+    const [productImages, websiteProducts] = productIds.length
+      ? await Promise.all([
+          this.products
+            .find({ _id: { $in: productIds } })
+            .select('imageUrl')
+            .lean(),
+          this.websiteProducts
+            .find({
+              isDeleted: { $ne: true },
+              inventoryProductId: { $in: productIds },
+            })
+            .select('inventoryProductId imageUrls')
+            .lean(),
+        ])
+      : [[], []];
+    const adminImages = new Map(
+      productImages.map((product: any) => [String(product._id), product.imageUrl]),
+    );
+    const websiteImages = new Map(
+      websiteProducts.map((product: any) => [
+        String(product.inventoryProductId),
+        (product.imageUrls || []).find(Boolean),
+      ]),
+    );
+    for (const [id, row] of map)
+      row.imageUrl = adminImages.get(id) || websiteImages.get(id) || undefined;
     const sort = query.sortBy === 'QUANTITY' ? 'quantity' : 'netRevenue';
     return {
       data: [...map.values()].sort((a, b) => b[sort] - a[sort]).slice(0, limit),

@@ -395,7 +395,7 @@ export class EmployeeKpisService {
     const invoices: any[] = await this.invoices
       .find(base)
       .sort({ date: -1, createdAt: -1, _id: -1 })
-      .populate('customerId', 'code name phone')
+      .populate('customerId', 'code name phone storefrontImage')
       .lean();
     const invoiceIds = invoices.map((invoice) => invoice._id);
     const activationFilter: any = {
@@ -453,6 +453,7 @@ export class EmployeeKpisService {
           customerName:
             invoice.customerName || customer?.name || invoice.customer,
           customerPhone: invoice.customerPhone ?? customer?.phone ?? '',
+          storefrontImage: customer?.storefrontImage,
           grandTotal: invoice.grandTotal,
           contributionValue,
           paymentStatus: invoice.paymentStatus,

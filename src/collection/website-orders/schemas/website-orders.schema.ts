@@ -37,6 +37,7 @@ export class WebsiteOrderItem {
   @prop() inventoryProductId?: string;
   @prop({ required: true }) productCode: string;
   @prop({ required: true }) productName: string;
+  @prop() imageUrl?: string;
   @prop() unit?: string;
   @prop({ required: true, min: 1 }) quantity: number;
   @prop({ required: true, min: 0 }) unitPrice: number;

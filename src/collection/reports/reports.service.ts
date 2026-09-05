@@ -396,7 +396,7 @@ export class ReportsService {
     const [customers, invoices, receipts]: any[][] = await Promise.all([
       this.customersModel
         .find(searchFilter)
-        .select('code name phone phones')
+        .select('code name phone phones storefrontImage')
         .sort({ code: 1, name: 1, _id: 1 })
         .lean(),
       this.invoices
@@ -459,6 +459,7 @@ export class ReportsService {
         customerCode: customer.code || '',
         customerName: customer.name,
         phone: customer.phone || customer.phones?.[0] || '',
+        storefrontImage: customer.storefrontImage,
         hasPurchased,
         purchaseStatus: hasPurchased ? 'PURCHASED' : 'NOT_PURCHASED',
         ...m,

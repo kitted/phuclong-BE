@@ -10,6 +10,7 @@ export class TruckTransferItem {
   @prop({ ref: () => Products, required: true }) productId: Ref<Products>;
   @prop({ required: true }) productCode: string;
   @prop({ required: true }) productName: string;
+  @prop() imageUrl?: string;
   @prop() unit?: string;
   @prop({ required: true, min: 1 }) qty: number;
   @prop({ required: true, min: 0 }) unitCost: number;

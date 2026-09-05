@@ -10,6 +10,7 @@ import { Invoices } from '../invoices/schemas/invoices.schema';
 import { InventoryMovements } from '../inventory/schemas/inventory-movement.schema';
 import { CustomerReturns } from '../customer-returns/schemas/customer-returns.schema';
 import { TruckStockChecks } from './schemas/truck-stock-checks.schema';
+import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 
 describe('TrucksService dependency injection', () => {
   it('uses the Typegoose connection token', async () => {
@@ -18,6 +19,7 @@ describe('TrucksService dependency injection', () => {
         TrucksService,
         { provide: getModelToken(Trucks.name), useValue: {} },
         { provide: getModelToken(Products.name), useValue: {} },
+        { provide: getModelToken(WebsiteProducts.name), useValue: {} },
         { provide: getModelToken(TruckTransfers.name), useValue: {} },
         { provide: getModelToken(TruckTransferCounters.name), useValue: {} },
         { provide: getModelToken(Users.name), useValue: {} },

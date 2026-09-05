@@ -4,6 +4,7 @@ import { ReturnModelType } from '@typegoose/typegoose';
 import { Connection, Types } from 'mongoose';
 import { Trucks } from './schemas/trucks.schema';
 import { Products } from '../products/schemas/products.schema';
+import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 import { TruckTransferCounters, TruckTransfers, TruckTransferType } from './schemas/truck-transfers.schema';
 import { AvailableProductsQueryDto, ChangeTruckStatusDto, CreateTruckDto, LoadGoodsDto, ReturnGoodsDto, ReverseTruckTransferDto, TruckGoodsReportQueryDto, TruckListQueryDto, TruckStatus, TruckToTruckTransferDto, TruckTransferQueryDto, UpdateTruckDto } from './dtos/trucks.dto';
 import { ID } from '../../core/interfaces/id.interface';
@@ -25,6 +26,7 @@ export class TrucksService {
   constructor(
     @InjectModel(Trucks) private readonly model: ReturnModelType<typeof Trucks>,
     @InjectModel(Products) private readonly productModel: ReturnModelType<typeof Products>,
+    @InjectModel(WebsiteProducts) private readonly websiteProductModel: ReturnModelType<typeof WebsiteProducts>,
     @InjectModel(TruckTransfers) private readonly transferModel: ReturnModelType<typeof TruckTransfers>,
     @InjectModel(TruckTransferCounters) private readonly transferCounterModel: ReturnModelType<typeof TruckTransferCounters>,
     @InjectModel(Users) private readonly userModel: ReturnModelType<typeof Users>,
@@ -87,10 +89,30 @@ export class TrucksService {
     return { data: truck };
   }
 
+  private async withProductImages(products: any[]) {
+    const ids = products.map((product) => product?._id).filter(Boolean);
+    if (!ids.length) return products;
+    const linked = await this.websiteProductModel
+      .find({ isDeleted: { $ne: true }, inventoryProductId: { $in: ids } })
+      .select('inventoryProductId imageUrls')
+      .lean();
+    const images = new Map(
+      linked.map((item: any) => [
+        String(item.inventoryProductId),
+        (item.imageUrls || []).find(Boolean),
+      ])
+    );
+    return products.map((product) => ({
+      ...product,
+      imageUrl: product.imageUrl || images.get(String(product._id)) || undefined,
+    }));
+  }
+
   private async productMapFor(trucks: any[]) {
     const ids = [...new Set(trucks.flatMap((truck) => (truck.inventory || []).map((item) => String(item.productId))))];
-    const products = ids.length ? await this.productModel.find({ _id: { $in: ids }, isDeleted: false }).select('code name unit costPrice').lean() : [];
-    return new Map(products.map((product: any) => [String(product._id), product]));
+    const products = ids.length ? await this.productModel.find({ _id: { $in: ids }, isDeleted: false }).select('code name unit costPrice imageUrl').lean() : [];
+    const withImages = await this.withProductImages(products);
+    return new Map(withImages.map((product: any) => [String(product._id), product]));
   }
 
   private async driverMapFor(trucks: any[]) {
@@ -102,7 +124,7 @@ export class TrucksService {
   private mapTruck(truck: any, products: Map<string, any>, preview = false, drivers = new Map<string, any>()) {
     const inventory = (truck.inventory || []).map((item) => {
       const product = products.get(String(item.productId)); const quantity = Number(item.qty) || 0; const costPrice = Number(product?.costPrice) || 0;
-      return { productId: String(item.productId), code: product?.code || '', name: product?.name || '', unit: product?.unit || '', quantity, costPrice, stockValue: quantity * costPrice };
+      return { productId: String(item.productId), code: product?.code || '', name: product?.name || '', unit: product?.unit || '', imageUrl: product?.imageUrl, quantity, costPrice, stockValue: quantity * costPrice };
     }).filter((item) => item.quantity > 0);
     const inventorySummary = {
       productTypes: inventory.length,
@@ -206,7 +228,8 @@ export class TrucksService {
       filter.$or = [{ code: { $regex: escaped, $options: 'i' } }, { name: { $regex: escaped, $options: 'i' } }];
     }
     const [products, totalItems] = await Promise.all([this.productModel.find(filter).sort({ code: 1 }).skip((page - 1) * limit).limit(limit).lean(), this.productModel.countDocuments(filter)]);
-    return { data: products.map((product: any) => ({ id: String(product._id), productId: String(product._id), code: product.code, name: product.name, unit: product.unit || '', stock: product.stock || 0, warehouseQuantity: product.stock || 0, costPrice: product.costPrice || 0 })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+    const withImages = await this.withProductImages(products);
+    return { data: withImages.map((product: any) => ({ id: String(product._id), productId: String(product._id), code: product.code, name: product.name, unit: product.unit || '', imageUrl: product.imageUrl, stock: product.stock || 0, warehouseQuantity: product.stock || 0, costPrice: product.costPrice || 0 })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }
 
   async availableDrivers(query: AvailableDriversQueryDto) {
@@ -237,7 +260,8 @@ export class TrucksService {
       filter.$or = [{ code: { $regex: escaped, $options: 'i' } }, { name: { $regex: escaped, $options: 'i' } }, { barcode: { $regex: escaped, $options: 'i' } }];
     }
     const [products, totalItems] = await Promise.all([this.productModel.find(filter).sort({ code: 1 }).skip((page - 1) * limit).limit(limit).lean(), this.productModel.countDocuments(filter)]);
-    return { data: products.map((product: any) => ({ id: String(product._id), productId: String(product._id), code: product.code, name: product.name, unit: product.unit || '', quantity: quantities.get(String(product._id)) || 0, sellPrice: product.sellPrice || 0 })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+    const withImages = await this.withProductImages(products);
+    return { data: withImages.map((product: any) => ({ id: String(product._id), productId: String(product._id), code: product.code, name: product.name, unit: product.unit || '', imageUrl: product.imageUrl, quantity: quantities.get(String(product._id)) || 0, sellPrice: product.sellPrice || 0 })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }
 
   private mergedItems(items: Array<{ productId: string; qty: number }>) {
@@ -273,9 +297,9 @@ export class TrucksService {
     const driverIds = [sourceTruck.driverId, destinationTruck.driverId].filter(Boolean); const drivers: any[] = driverIds.length ? await this.userModel.find({ _id: { $in: driverIds }, isDeleted: false }).select('employeeCode fullName phone role status').session(session).lean() : [];
     const driverMap = new Map(drivers.map((driver) => [String(driver._id), driver])); const sourceDriver: any = sourceTruck.driverId ? driverMap.get(String(sourceTruck.driverId)) : null; const destinationDriver: any = destinationTruck.driverId ? driverMap.get(String(destinationTruck.driverId)) : null;
     if (!destinationDriver || destinationDriver.role !== RoleEnum.STAFF || destinationDriver.status !== UserStatus.ACTIVE) throw new ConflictException('Xe nhận phải có tài xế đang hoạt động');
-    const products: any[] = await this.productModel.find({ _id: { $in: items.map((item) => item.productId) }, isDeleted: false }).select('code name unit costPrice').session(session).lean(); if (products.length !== items.length) throw new BadRequestException('Một hoặc nhiều sản phẩm không tồn tại');
+    const products: any[] = await this.productModel.find({ _id: { $in: items.map((item) => item.productId) }, isDeleted: false }).select('code name unit costPrice imageUrl').session(session).lean(); if (products.length !== items.length) throw new BadRequestException('Một hoặc nhiều sản phẩm không tồn tại');
     const productMap = new Map<string, any>(products.map((product) => [String(product._id), product])); const sourceInventory = new Map<string, number>((sourceTruck.inventory || []).map((item) => [String(item.productId), Number(item.qty) || 0])); const destinationInventory = new Map<string, number>((destinationTruck.inventory || []).map((item) => [String(item.productId), Number(item.qty) || 0]));
-    const snapshots = items.map((item) => { const product: any = productMap.get(item.productId); const sourceQuantity = sourceInventory.get(item.productId) || 0; if (sourceQuantity < item.qty) throw new ConflictException({ code: 'SOURCE_TRUCK_INSUFFICIENT_STOCK', message: 'Xe nguồn không đủ hàng', details: { productId: item.productId, availableQuantity: sourceQuantity, requestedQuantity: item.qty } }); const unitCost = Number(product.costPrice) || 0; return { productId: item.productId, productCode: product.code, productName: product.name, unit: product.unit || '', qty: item.qty, quantity: item.qty, unitCost, costPrice: unitCost, totalValue: item.qty * unitCost, sourceQuantityBefore: sourceQuantity, sourceQuantityAfter: sourceQuantity - item.qty, destinationQuantityBefore: destinationInventory.get(item.productId) || 0, destinationQuantityAfter: (destinationInventory.get(item.productId) || 0) + item.qty }; });
+    const snapshots = items.map((item) => { const product: any = productMap.get(item.productId); const sourceQuantity = sourceInventory.get(item.productId) || 0; if (sourceQuantity < item.qty) throw new ConflictException({ code: 'SOURCE_TRUCK_INSUFFICIENT_STOCK', message: 'Xe nguồn không đủ hàng', details: { productId: item.productId, availableQuantity: sourceQuantity, requestedQuantity: item.qty } }); const unitCost = Number(product.costPrice) || 0; return { productId: item.productId, productCode: product.code, productName: product.name, imageUrl: product.imageUrl, unit: product.unit || '', qty: item.qty, quantity: item.qty, unitCost, costPrice: unitCost, totalValue: item.qty * unitCost, sourceQuantityBefore: sourceQuantity, sourceQuantityAfter: sourceQuantity - item.qty, destinationQuantityBefore: destinationInventory.get(item.productId) || 0, destinationQuantityAfter: (destinationInventory.get(item.productId) || 0) + item.qty }; });
     return { sourceTruck, destinationTruck, sourceDriver, destinationDriver, date, snapshots };
   }
 
@@ -294,7 +318,7 @@ export class TrucksService {
       }
       await this.model.updateOne({ _id: context.sourceTruck._id }, { $pull: { inventory: { qty: { $lte: 0 } } } }, { session });
       const transfer: any = (await this.transferModel.create([{ code, type: TruckTransferType.TRUCK_TO_TRUCK, truckId: context.sourceTruck._id, truckCode: context.sourceTruck.code, truckName: context.sourceTruck.name, truckLicensePlate: context.sourceTruck.licensePlate, sourceTruckId: context.sourceTruck._id, sourceTruckCode: context.sourceTruck.code, sourceTruckName: context.sourceTruck.name, sourceTruckLicensePlate: context.sourceTruck.licensePlate, sourceDriverId: context.sourceDriver?._id, sourceDriverCode: context.sourceDriver?.employeeCode, sourceDriverName: context.sourceDriver?.fullName || context.sourceTruck.driverName, sourceDriverPhone: context.sourceDriver?.phone || context.sourceTruck.driverPhone, destinationTruckId: context.destinationTruck._id, destinationTruckCode: context.destinationTruck.code, destinationTruckName: context.destinationTruck.name, destinationTruckLicensePlate: context.destinationTruck.licensePlate, destinationDriverId: context.destinationDriver._id, destinationDriverCode: context.destinationDriver.employeeCode, destinationDriverName: context.destinationDriver.fullName || context.destinationTruck.driverName, destinationDriverPhone: context.destinationDriver.phone || context.destinationTruck.driverPhone, date: context.date, note: dto.note?.trim(), items: context.snapshots, totalQuantity: context.snapshots.reduce((sum, item) => sum + item.qty, 0), totalValue: context.snapshots.reduce((sum, item) => sum + item.totalValue, 0), createdBy: createdBy || undefined, reversalOf: reversalOf || undefined }], { session }))[0];
-      const [sourceUpdated, destinationUpdated]: any[] = await Promise.all([this.model.findById(context.sourceTruck._id).session(session).lean(), this.model.findById(context.destinationTruck._id).session(session).lean()]); const products = await this.productMapFor([sourceUpdated, destinationUpdated]); const drivers = await this.driverMapFor([sourceUpdated, destinationUpdated]); result = { data: { transfer: this.mapTransfer(transfer.toObject()), sourceTruck: this.mapTruck(sourceUpdated, products, false, drivers), destinationTruck: this.mapTruck(destinationUpdated, products, false, drivers) } };
+      const [sourceUpdated, destinationUpdated]: any[] = await Promise.all([this.model.findById(context.sourceTruck._id).session(session).lean(), this.model.findById(context.destinationTruck._id).session(session).lean()]); const products = await this.productMapFor([sourceUpdated, destinationUpdated]); const drivers = await this.driverMapFor([sourceUpdated, destinationUpdated]); result = { data: { transfer: this.mapTransfer(transfer.toObject(), products), sourceTruck: this.mapTruck(sourceUpdated, products, false, drivers), destinationTruck: this.mapTruck(destinationUpdated, products, false, drivers) } };
     }); return result; } finally { await session.endSession(); }
   }
 
@@ -332,7 +356,7 @@ export class TrucksService {
             }
             const updated = await this.model.updateOne({ _id: truckId, inventory: { $elemMatch: { productId: item.productId } } }, { $inc: { 'inventory.$.qty': item.qty } }, { session });
             if (!updated.modifiedCount) await this.model.updateOne({ _id: truckId }, { $push: { inventory: { productId: item.productId, qty: item.qty } } }, { session });
-            snapshots.push({ productId: item.productId, productCode: product.code, productName: product.name, unit: product.unit || '', qty: item.qty, unitCost: product.costPrice || 0, totalValue: item.qty * (product.costPrice || 0) });
+            snapshots.push({ productId: item.productId, productCode: product.code, productName: product.name, imageUrl: product.imageUrl, unit: product.unit || '', qty: item.qty, unitCost: product.costPrice || 0, totalValue: item.qty * (product.costPrice || 0) });
             movementInputs.push({ productId: item.productId, type: InventoryMovementType.TRANSFER_TO_TRUCK, quantityChange: -item.qty, quantityBefore: product.stock, quantityAfter: product.stock - item.qty, sourceType: InventoryLocationType.WAREHOUSE, destinationType: InventoryLocationType.TRUCK, destinationTruckId: truckId });
           } else {
             const beforeTruck: any = await this.model.findOneAndUpdate(
@@ -345,7 +369,7 @@ export class TrucksService {
             }
             const product: any = await this.productModel.findOneAndUpdate({ _id: item.productId, isDeleted: false }, { $inc: { stock: item.qty } }, { new: false, session });
             if (!product) throw new BadRequestException(`Sản phẩm ${item.productId} không tồn tại`);
-            snapshots.push({ productId: item.productId, productCode: product.code, productName: product.name, unit: product.unit || '', qty: item.qty, unitCost: product.costPrice || 0, totalValue: item.qty * (product.costPrice || 0) });
+            snapshots.push({ productId: item.productId, productCode: product.code, productName: product.name, imageUrl: product.imageUrl, unit: product.unit || '', qty: item.qty, unitCost: product.costPrice || 0, totalValue: item.qty * (product.costPrice || 0) });
             movementInputs.push({ productId: item.productId, type: InventoryMovementType.RETURN_FROM_TRUCK, quantityChange: item.qty, quantityBefore: product.stock, quantityAfter: product.stock + item.qty, sourceType: InventoryLocationType.TRUCK, sourceTruckId: truckId, destinationType: InventoryLocationType.WAREHOUSE });
           }
         }
@@ -361,16 +385,23 @@ export class TrucksService {
         }], { session }))[0];
         await this.movements.recordMany(movementInputs.map((movement) => ({ ...movement, referenceType: type === TruckTransferType.LOAD ? 'TRUCK_LOAD' : 'TRUCK_RETURN', referenceId: String(transfer._id), referenceCode: code })), session);
         const updatedTruck: any = await this.model.findById(truckId).session(session).lean(); const products = await this.productMapFor([updatedTruck]);
-        result = { data: { transfer: this.mapTransfer(transfer.toObject()), truck: this.mapTruck(updatedTruck, products) } };
+        result = { data: { transfer: this.mapTransfer(transfer.toObject(), products), truck: this.mapTruck(updatedTruck, products) } };
       });
       return result;
     } finally { await session.endSession(); }
   }
 
-  private mapTransfer(transfer: any) {
+  private async transferProductMap(transfers: any[]): Promise<Map<string, any>> {
+    const ids = [...new Set(transfers.flatMap((transfer) => (transfer.items || []).map((item: any) => String(item.productId || '')).filter((id: string) => Types.ObjectId.isValid(id))))];
+    const products: any[] = ids.length ? await this.productModel.find({ _id: { $in: ids } }).select('imageUrl').lean() : [];
+    const withImages = await this.withProductImages(products);
+    return new Map<string, any>(withImages.map((product: any) => [String(product._id), product] as [string, any]));
+  }
+
+  private mapTransfer(transfer: any, products: Map<string, any> = new Map()) {
     const creator = transfer.createdBy;
     const truckSnapshot = (prefix: 'source' | 'destination') => transfer[`${prefix}TruckId`] ? { id: String(transfer[`${prefix}TruckId`]), code: transfer[`${prefix}TruckCode`], name: transfer[`${prefix}TruckName`], licensePlate: transfer[`${prefix}TruckLicensePlate`], driver: transfer[`${prefix}DriverId`] || transfer[`${prefix}DriverName`] ? { id: transfer[`${prefix}DriverId`] ? String(transfer[`${prefix}DriverId`]) : null, employeeCode: transfer[`${prefix}DriverCode`], fullName: transfer[`${prefix}DriverName`], phone: transfer[`${prefix}DriverPhone`] } : null } : null;
-    return { id: String(transfer._id), code: transfer.code, type: transfer.type, date: transfer.date, truck: { id: String(transfer.truckId), code: transfer.truckCode, name: transfer.truckName, licensePlate: transfer.truckLicensePlate }, sourceTruck: truckSnapshot('source'), destinationTruck: truckSnapshot('destination'), driver: transfer.driverId || transfer.driverName ? { id: transfer.driverId ? String(transfer.driverId) : null, employeeCode: transfer.driverCode, fullName: transfer.driverName, phone: transfer.driverPhone } : null, totalQuantity: transfer.totalQuantity, totalValue: transfer.totalValue, note: transfer.note, reversalOf: transfer.reversalOf ? String(transfer.reversalOf) : null, items: (transfer.items || []).map((item) => ({ productId: String(item.productId), productCode: item.productCode, productName: item.productName, unit: item.unit || '', qty: item.qty, unitCost: item.unitCost, stockValue: item.totalValue ?? item.qty * item.unitCost })), createdBy: creator ? { id: String(creator._id || creator), fullName: creator.fullName || creator.username } : null, createdAt: transfer.createdAt };
+    return { id: String(transfer._id), code: transfer.code, type: transfer.type, date: transfer.date, truck: { id: String(transfer.truckId), code: transfer.truckCode, name: transfer.truckName, licensePlate: transfer.truckLicensePlate }, sourceTruck: truckSnapshot('source'), destinationTruck: truckSnapshot('destination'), driver: transfer.driverId || transfer.driverName ? { id: transfer.driverId ? String(transfer.driverId) : null, employeeCode: transfer.driverCode, fullName: transfer.driverName, phone: transfer.driverPhone } : null, totalQuantity: transfer.totalQuantity, totalValue: transfer.totalValue, note: transfer.note, reversalOf: transfer.reversalOf ? String(transfer.reversalOf) : null, items: (transfer.items || []).map((item) => ({ productId: String(item.productId), productCode: item.productCode, productName: item.productName, imageUrl: products.get(String(item.productId))?.imageUrl || item.imageUrl, unit: item.unit || '', qty: item.qty, unitCost: item.unitCost, stockValue: item.totalValue ?? item.qty * item.unitCost })), createdBy: creator ? { id: String(creator._id || creator), fullName: creator.fullName || creator.username } : null, createdAt: transfer.createdAt };
   }
 
   private transferFilter(query: TruckTransferQueryDto) {
@@ -397,13 +428,15 @@ export class TrucksService {
   async findTransfers(query: TruckTransferQueryDto): Promise<any> {
     const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100); const filter = this.transferFilter(query);
     const [transfers, totalItems] = await Promise.all([this.transferModel.find(filter).sort({ date: -1, createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).populate('createdBy', 'fullName username').lean(), this.transferModel.countDocuments(filter)]);
-    return { data: transfers.map((transfer) => this.mapTransfer(transfer)), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+    const products = await this.transferProductMap(transfers);
+    return { data: transfers.map((transfer) => this.mapTransfer(transfer, products)), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
   }
 
   async findTransfer(id: string) {
     const transfer = await this.transferModel.findOne({ _id: id, isDeleted: false }).populate('createdBy', 'fullName username').lean();
     if (!transfer) throw new NotFoundException('Không tìm thấy phiếu điều chuyển');
-    return { data: this.mapTransfer(transfer) };
+    const products = await this.transferProductMap([transfer]);
+    return { data: this.mapTransfer(transfer, products) };
   }
 
   async transferSummary(query: TruckTransferQueryDto) {

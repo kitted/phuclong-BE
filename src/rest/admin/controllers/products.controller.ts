@@ -8,7 +8,10 @@ import {
   Query,
   Res,
   StreamableFile,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
@@ -100,6 +103,11 @@ export class ProductsController {
   ) {
     return await this.service.update(id, dto);
   }
+
+  @Post(':id/image')
+  @AdminOnly()
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  uploadImage(@Param('id', ParseIdPipe) id: ID, @UploadedFile() file: any) { return this.service.uploadImage(id, file); }
 
   @ApiOperation({ summary: 'Delete product' })
   @Delete(':id')

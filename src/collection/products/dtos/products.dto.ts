@@ -24,6 +24,9 @@ export class CreateProductDto {
   @IsNotEmpty()
   name: string;
 
+  @ApiProperty({ required: false }) @IsString() @IsOptional() imageUrl?: string;
+  @ApiProperty({ required: false }) @IsString() @IsOptional() websiteProductId?: string;
+
   @ApiProperty({ required: false })
   @IsMongoId() // Đảm bảo ID truyền lên đúng định dạng MongoDB ObjectId
   @IsOptional()

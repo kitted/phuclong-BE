@@ -29,6 +29,10 @@ import {
   CustomerReturnStatus,
 } from '../customer-returns/schemas/customer-returns.schema';
 import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
+import { Products } from '../products/schemas/products.schema';
+import { Customers } from '../customers/schemas/customers.schema';
+import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
+import { Types } from 'mongoose';
 @Injectable()
 export class DailyReportsService {
   constructor(
@@ -41,6 +45,11 @@ export class DailyReportsService {
     private receipts: ReturnModelType<typeof DebtPayments>,
     @InjectModel(CustomerReturns)
     private returns: ReturnModelType<typeof CustomerReturns>,
+    @InjectModel(Products) private productsModel: ReturnModelType<typeof Products>,
+    @InjectModel(Customers)
+    private customers: ReturnModelType<typeof Customers>,
+    @InjectModel(WebsiteProducts)
+    private websiteProducts: ReturnModelType<typeof WebsiteProducts>,
   ) {}
   async preview(date: string) {
     const from = vietnamDateBoundary(date, false),
@@ -84,6 +93,7 @@ export class DailyReportsService {
         code: x.code,
         date: x.date,
         customerName: x.customerName || x.customer,
+        customerId: x.customerId ? String(x.customerId) : undefined,
         employeeName: x.salespersonName,
         amount: Number(x.grandTotal || 0),
         note: x.note,
@@ -125,6 +135,7 @@ export class DailyReportsService {
         code: x.code,
         date: x.date,
         customerName: x.customerName,
+        customerId: x.customerId ? String(x.customerId) : undefined,
         employeeName: x.collectorName,
         amount: Number(x.amount || 0),
         note: x.note,
@@ -137,6 +148,7 @@ export class DailyReportsService {
         code: x.code,
         date: x.createdAt,
         customerName: x.customerName,
+        customerId: x.customerId ? String(x.customerId) : undefined,
         employeeName: x.driverName,
         amount: -Number(x.returnAmount || 0),
         note: x.note,
@@ -149,6 +161,46 @@ export class DailyReportsService {
         (s, x) => s + Number(x.returnAmount || 0),
         0,
       );
+    const productRows = [...products.values()];
+    const productIds = productRows
+      .map((item) => String(item.productId || ''))
+      .filter((id) => Types.ObjectId.isValid(id));
+    const customerIds = documents
+      .map((item) => String(item.customerId || ''))
+      .filter((id) => Types.ObjectId.isValid(id));
+    const [adminProducts, linkedProducts, customerRows] = await Promise.all([
+      productIds.length
+        ? this.productsModel.find({ _id: { $in: productIds } }).select('imageUrl').lean()
+        : [],
+      productIds.length
+        ? this.websiteProducts
+            .find({ isDeleted: { $ne: true }, inventoryProductId: { $in: productIds } })
+            .select('inventoryProductId imageUrls')
+            .lean()
+        : [],
+      customerIds.length
+        ? this.customers.find({ _id: { $in: customerIds } }).select('storefrontImage').lean()
+        : [],
+    ]);
+    const adminImages = new Map(
+      adminProducts.map((item: any) => [String(item._id), item.imageUrl] as [string, any]),
+    );
+    const websiteImages = new Map(
+      linkedProducts.map((item: any) => [
+        String(item.inventoryProductId),
+        (item.imageUrls || []).find(Boolean),
+      ] as [string, any]),
+    );
+    const storefrontImages = new Map(
+      customerRows.map((item: any) => [String(item._id), item.storefrontImage] as [string, any]),
+    );
+    for (const item of documents)
+      item.storefrontImage = storefrontImages.get(String(item.customerId)) || item.storefrontImage;
+    for (const item of productRows)
+      item.imageUrl =
+        adminImages.get(String(item.productId)) ||
+        websiteImages.get(String(item.productId)) ||
+        item.imageUrl;
     return {
       data: {
         reportDate: date,
@@ -167,7 +219,7 @@ export class DailyReportsService {
         },
         documents,
         employees: [...employees.values()],
-        products: [...products.values()],
+        products: productRows,
       },
     };
   }

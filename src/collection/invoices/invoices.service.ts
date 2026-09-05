@@ -70,6 +70,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationType } from '../notifications/schemas/notifications.schema';
 import * as ExcelJS from 'exceljs';
 import { LeadsService } from '../leads/leads.service';
+import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 
 type Actor = { id?: string; role?: RoleEnum };
 
@@ -132,6 +133,8 @@ export class InvoicesService {
     private readonly model: ReturnModelType<typeof Invoices>,
     @InjectModel(Products)
     private readonly productModel: ReturnModelType<typeof Products>,
+    @InjectModel(WebsiteProducts)
+    private readonly websiteProductModel: ReturnModelType<typeof WebsiteProducts>,
     @InjectModel(Trucks)
     private readonly truckModel: ReturnModelType<typeof Trucks>,
     @InjectModel(Customers)
@@ -167,6 +170,55 @@ export class InvoicesService {
     private readonly leadsService: LeadsService,
     @Inject(getConnectionToken()) private readonly connection: Connection,
   ) {}
+
+  private async withItemImages(documents: any[]): Promise<any[]> {
+    const ids = [
+      ...new Set(
+        documents
+          .flatMap((document) => document.items || [])
+          .map((item) =>
+            String(
+              typeof item.productId === 'object'
+                ? item.productId?._id || item.productId?.id || ''
+                : item.productId || '',
+            ),
+          )
+          .filter((id) => Types.ObjectId.isValid(id)),
+      ),
+    ];
+    if (!ids.length) return documents;
+    const [products, linked] = await Promise.all([
+      this.productModel.find({ _id: { $in: ids } }).select('imageUrl').lean(),
+      this.websiteProductModel
+        .find({ isDeleted: { $ne: true }, inventoryProductId: { $in: ids } })
+        .select('inventoryProductId imageUrls')
+        .lean(),
+    ]);
+    const adminImages = new Map(
+      products.map((product: any) => [String(product._id), product.imageUrl]),
+    );
+    const websiteImages = new Map(
+      linked.map((product: any) => [
+        String(product.inventoryProductId),
+        (product.imageUrls || []).find(Boolean),
+      ]),
+    );
+    return documents.map((document) => ({
+      ...document,
+      items: (document.items || []).map((item: any) => {
+        const id = String(
+          typeof item.productId === 'object'
+            ? item.productId?._id || item.productId?.id || ''
+            : item.productId || '',
+        );
+        return {
+          ...item,
+          imageUrl:
+            adminImages.get(id) || websiteImages.get(id) || item.imageUrl,
+        };
+      }),
+    }));
+  }
 
   private applyInvoicePeriod(filter: any, query: InvoiceQueryDto) {
     if (!query.from && !query.to) return;
@@ -1571,12 +1623,13 @@ export class InvoicesService {
         .sort({ date: -1, createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .populate('customerId', 'code name phone phones address')
+        .populate('customerId', 'code name phone phones address storefrontImage')
         .populate('salespersonId', 'employeeCode fullName')
         .lean(),
       this.model.countDocuments(filter),
     ]);
-    const invoiceIds = rows.map((row: any) => row._id);
+    const enrichedRows = await this.withItemImages(rows);
+    const invoiceIds = enrichedRows.map((row: any) => row._id);
     const activations: any[] = invoiceIds.length
       ? await this.activationModel
           .find({ invoiceId: { $in: invoiceIds }, isDeleted: false })
@@ -1589,7 +1642,7 @@ export class InvoicesService {
       byInvoice.set(key, [...(byInvoice.get(key) || []), activation]);
     }
     return {
-      data: rows.map((row: any) => ({
+      data: enrichedRows.map((row: any) => ({
         ...row,
         id: String(row._id),
         activationCodes: byInvoice.get(String(row._id)) || [],
@@ -1672,13 +1725,14 @@ export class InvoicesService {
       this.model
         .find(invoiceFilter)
         .select('-__v')
-        .populate('customerId', 'code name phone phones address')
+        .populate('customerId', 'code name phone phones address storefrontImage')
         .populate('salespersonId', 'employeeCode fullName')
         .lean(),
       this.debtPaymentModel.find(receiptFilter).select('-__v').lean(),
     ]);
+    const enrichedInvoices = await this.withItemImages(invoices);
     const documents = [
-      ...invoices.map((invoice: any) => ({
+      ...enrichedInvoices.map((invoice: any) => ({
         ...invoice,
         id: String(invoice._id),
         documentType: 'INVOICE',
@@ -1959,11 +2013,11 @@ export class InvoicesService {
         isDeleted: false,
         ...(!access.canViewAll ? { salespersonId: access.id } : {}),
       })
-      .populate('customerId', 'code name phone phones address')
+      .populate('customerId', 'code name phone phones address storefrontImage')
       .populate('truckId', 'code name licensePlate')
       .populate('salespersonId', 'employeeCode fullName')
       .lean();
     if (!doc) throw new NotFoundException('Không tìm thấy hóa đơn');
-    return { data: doc };
+    return { data: (await this.withItemImages([doc]))[0] };
   }
 }

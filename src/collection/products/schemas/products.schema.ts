@@ -19,6 +19,14 @@ export class Products extends BaseModel {
   @prop({ required: true })
   name: string;
 
+  // Local illustration uploaded from BO. Read APIs use this first, then fall
+  // back to the first image of the linked website product.
+  @prop()
+  imageUrl?: string;
+
+  @prop()
+  websiteProductId?: string;
+
   @prop({ ref: () => Categories, required: false, default: null })
   categoryId?: Ref<Categories>;
 

@@ -13,11 +13,13 @@ import { Users } from '../users/schemas/users.schema';
 import { Notifications } from '../notifications/schemas/notifications.schema';
 import { AuditLogs } from '../audit-logs/schemas/audit-logs.schema';
 import { WarehouseStockCheckService } from './warehouse-stock-check.service';
+import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 
 @Module({
   imports: [
     TypegooseModule.forFeature([
       Products,
+      WebsiteProducts,
       Trucks,
       InventoryMovements,
       WarehouseStockChecks,

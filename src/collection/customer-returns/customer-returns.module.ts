@@ -4,5 +4,6 @@ import { CustomerReturnCounters, CustomerReturns, TruckUnclassifiedReturnStock }
 import { Customers } from '../customers/schemas/customers.schema'; import { Trucks } from '../trucks/schemas/trucks.schema'; import { Products } from '../products/schemas/products.schema';
 import { InventoryMovements } from '../inventory/schemas/inventory-movement.schema'; import { CustomerDebtLedger } from '../debt-payments/schemas/customer-debt-ledger.schema'; import { Notifications } from '../notifications/schemas/notifications.schema';
 import { CustomerReturnsService } from './customer-returns.service';
-@Module({ imports: [TypegooseModule.forFeature([CustomerReturns, CustomerReturnCounters, TruckUnclassifiedReturnStock, Customers, Trucks, Products, InventoryMovements, CustomerDebtLedger, Notifications])], providers: [CustomerReturnsService], exports: [CustomerReturnsService] })
+import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
+@Module({ imports: [TypegooseModule.forFeature([CustomerReturns, CustomerReturnCounters, TruckUnclassifiedReturnStock, Customers, Trucks, Products, WebsiteProducts, InventoryMovements, CustomerDebtLedger, Notifications])], providers: [CustomerReturnsService], exports: [CustomerReturnsService] })
 export class CustomerReturnsModule {}

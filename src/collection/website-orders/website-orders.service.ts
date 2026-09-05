@@ -54,6 +54,28 @@ export class WebsiteOrdersService {
     return createHash('sha256').update(token).digest('hex');
   }
 
+  private async withOrderImages(rows: any[]): Promise<any[]> {
+    const inventoryIds = [...new Set(rows.flatMap((row) => row.items || []).map((item) => String(item.inventoryProductId || '')).filter((id) => Types.ObjectId.isValid(id)))];
+    const websiteIds = [...new Set(rows.flatMap((row) => row.items || []).map((item) => String(item.websiteProductId || '')).filter((id) => Types.ObjectId.isValid(id)))];
+    const customerIds = [...new Set(rows.map((row) => String(row.customerId || '')).filter((id) => Types.ObjectId.isValid(id)))];
+    const [inventoryProducts, websiteProducts, customers] = await Promise.all([
+      inventoryIds.length ? this.products.find({ _id: { $in: inventoryIds } }).select('imageUrl').lean() : [],
+      websiteIds.length ? this.websiteProducts.find({ _id: { $in: websiteIds }, isDeleted: { $ne: true } }).select('imageUrls').lean() : [],
+      customerIds.length ? this.customers.find({ _id: { $in: customerIds } }).select('storefrontImage').lean() : [],
+    ]);
+    const adminImages = new Map<string, any>(inventoryProducts.map((product: any) => [String(product._id), product.imageUrl] as [string, any]));
+    const websiteImages = new Map<string, any>(websiteProducts.map((product: any) => [String(product._id), (product.imageUrls || []).find(Boolean)] as [string, any]));
+    const storefrontImages = new Map<string, any>(customers.map((customer: any) => [String(customer._id), customer.storefrontImage] as [string, any]));
+    return rows.map((row) => ({
+      ...row,
+      storefrontImage: storefrontImages.get(String(row.customerId)) || row.storefrontImage,
+      items: (row.items || []).map((item: any) => ({
+        ...item,
+        imageUrl: adminImages.get(String(item.inventoryProductId)) || websiteImages.get(String(item.websiteProductId)) || item.imageUrl,
+      })),
+    }));
+  }
+
   private async nextCode(): Promise<string> {
     const date = new Date();
     const day = `${String(date.getFullYear()).slice(-2)}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
@@ -282,7 +304,7 @@ export class WebsiteOrdersService {
     const items = dto.items.map((item) => {
       const product: any = productMap.get(item.productId);
       const unitPrice = Number(product.sellPrice) || 0;
-      return { websiteProductId: item.productId, inventoryProductId: product.inventoryProductId, productCode: product.code, productName: product.name, unit: product.unit, quantity: item.quantity, unitPrice, lineTotal: unitPrice * item.quantity };
+      return { websiteProductId: item.productId, inventoryProductId: product.inventoryProductId, productCode: product.code, productName: product.name, imageUrl: (product.imageUrls || []).find(Boolean), unit: product.unit, quantity: item.quantity, unitPrice, lineTotal: unitPrice * item.quantity };
     });
     const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
     const accessToken = randomBytes(24).toString('hex');
@@ -308,7 +330,8 @@ export class WebsiteOrdersService {
       accessTokenHash: this.hash(accessToken),
       statusHistory: [{ status, at: new Date(), note: 'Đơn hàng được tạo từ website' }],
     });
-    return { data: { order: this.publicOrder(order.toObject()), accessToken, simulatedPayment: dto.paymentMethod === WebsitePaymentMethod.VNPAY_SIMULATED ? { method: 'VNPAY_SIMULATED', confirmEndpoint: `/public/website-orders/${code}/payments/simulate-success` } : null } };
+    const orderWithImages = (await this.withOrderImages([order.toObject()]))[0];
+    return { data: { order: this.publicOrder(orderWithImages), accessToken, simulatedPayment: dto.paymentMethod === WebsitePaymentMethod.VNPAY_SIMULATED ? { method: 'VNPAY_SIMULATED', confirmEndpoint: `/public/website-orders/${code}/payments/simulate-success` } : null } };
   }
 
   private publicOrder(order: any): any {
@@ -326,7 +349,7 @@ export class WebsiteOrdersService {
 
   async publicDetail(code: string, token: string): Promise<any> {
     const order = await this.ownedOrder(code, token);
-    return { data: this.publicOrder(order.toObject()) };
+    return { data: this.publicOrder((await this.withOrderImages([order.toObject()]))[0]) };
   }
 
   async simulatePayment(code: string, token: string): Promise<any> {
@@ -335,7 +358,7 @@ export class WebsiteOrdersService {
     if (order.status === WebsiteOrderStatus.CANCELLED) throw new BadRequestException('Đơn hàng đã bị hủy');
     order.paymentStatus = WebsitePaymentStatus.PAID_SIMULATED;
     await order.save();
-    return { data: this.publicOrder(order.toObject()) };
+    return { data: this.publicOrder((await this.withOrderImages([order.toObject()]))[0]) };
   }
 
   async adminList(q: WebsiteOrderAdminQueryDto): Promise<any> {
@@ -346,13 +369,13 @@ export class WebsiteOrdersService {
     if (q.from || q.to) { filter.createdAt = {}; if (q.from) filter.createdAt.$gte = new Date(q.from); if (q.to) filter.createdAt.$lte = new Date(q.to); }
     if (q.search?.trim()) { const escaped = q.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); filter.$or = [{ code: new RegExp(escaped, 'i') }, { customerName: new RegExp(escaped, 'i') }, { customerPhone: new RegExp(escaped, 'i') }]; }
     const [data, total] = await Promise.all([this.orders.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(), this.orders.countDocuments(filter)]);
-    return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    return { data: await this.withOrderImages(data), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
   async adminDetail(id: string): Promise<any> {
     const doc = await this.orders.findOne({ _id: id, isDeleted: false }).lean();
     if (!doc) throw new NotFoundException('Không tìm thấy đơn hàng website');
-    return { data: doc };
+    return { data: (await this.withOrderImages([doc]))[0] };
   }
 
   async assign(id: string, dto: AssignWebsiteOrderDto, actorId: string): Promise<any> {
@@ -365,7 +388,7 @@ export class WebsiteOrdersService {
       { new: true },
     );
     if (!doc) throw new BadRequestException('Không thể phân công đơn ở trạng thái hiện tại');
-    return { data: doc };
+    return { data: (await this.withOrderImages([doc.toObject()]))[0] };
   }
 
   async changeStatus(id: string, dto: ChangeWebsiteOrderStatusDto, actorId: string): Promise<any> {
@@ -383,7 +406,7 @@ export class WebsiteOrdersService {
     order.status = dto.status;
     order.statusHistory.push({ status: dto.status, at: new Date(), by: actorId, note: dto.note });
     await order.save();
-    return { data: order };
+    return { data: (await this.withOrderImages([order.toObject()]))[0] };
   }
 
   async convertToInvoice(id: string, dto: ConvertWebsiteOrderDto, actorId: string): Promise<any> {

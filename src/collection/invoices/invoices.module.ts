@@ -17,9 +17,10 @@ import { CustomerDebtLedger } from '../debt-payments/schemas/customer-debt-ledge
 import { DebtPaymentCounters, DebtPayments } from '../debt-payments/schemas/debt-payments.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { LeadsModule } from '../leads/leads.module';
+import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 
 @Module({
-  imports: [TypegooseModule.forFeature([Invoices, Products, Trucks, Customers, Users, Promotions, Vouchers, InvoiceCounters, Categories, PromotionActivations, CustomerDebtLedger, DebtPayments, DebtPaymentCounters]), InventoryMovementsModule, PromotionActivationsModule, NotificationsModule, LeadsModule],
+  imports: [TypegooseModule.forFeature([Invoices, Products, WebsiteProducts, Trucks, Customers, Users, Promotions, Vouchers, InvoiceCounters, Categories, PromotionActivations, CustomerDebtLedger, DebtPayments, DebtPaymentCounters]), InventoryMovementsModule, PromotionActivationsModule, NotificationsModule, LeadsModule],
   providers: [InvoicesService, PromotionRuleEngineService],
   exports: [InvoicesService],
 })
