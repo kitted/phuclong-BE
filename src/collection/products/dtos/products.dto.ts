@@ -7,6 +7,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, PartialType } from '@nestjs/swagger';
 import { ID } from 'src/core/interfaces/id.interface';
+import { Type } from 'class-transformer';
 
 export class CreateProductDto {
   @ApiProperty()
@@ -34,11 +35,13 @@ export class CreateProductDto {
   unit?: string;
 
   @ApiProperty({ required: false })
+  @Type(() => Number)
   @IsNumber()
   @IsOptional()
   costPrice?: number;
 
   @ApiProperty({ required: false })
+  @Type(() => Number)
   @IsNumber()
   @IsOptional()
   sellPrice?: number;
