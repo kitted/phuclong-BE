@@ -1,19 +1,41 @@
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsMongoId, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
-import { InvoicePaymentStatus, PaymentMethod } from '../schemas/invoices.schema';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsMongoId,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import {
+  InvoicePaymentStatus,
+  PaymentMethod,
+} from '../schemas/invoices.schema';
 
 export class InvoiceItemDto {
   @ApiProperty() @IsMongoId() productId: string;
   @ApiProperty() @IsInt() @Min(1) qty: number;
-  @ApiPropertyOptional() @IsOptional() @IsNumber() @Min(0.01) unitPriceOverride?: number;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  unitPriceOverride?: number;
 }
 export class InvoiceGiftDto {
   @ApiProperty() @IsMongoId() productId: string;
   @ApiProperty() @IsInt() @Min(1) qty: number;
 }
 export class InvoicePaymentDto {
-  @ApiProperty({ enum: PaymentMethod }) @IsEnum(PaymentMethod) method: PaymentMethod;
+  @ApiProperty({ enum: PaymentMethod })
+  @IsEnum(PaymentMethod)
+  method: PaymentMethod;
   @ApiProperty() @Min(0) amount: number;
   @ApiPropertyOptional() @IsOptional() @IsString() referenceCode?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() bankName?: string;
@@ -22,15 +44,27 @@ export class InvoicePaymentDto {
 export class InvoicePreviewDto {
   @ApiPropertyOptional() @IsOptional() @IsMongoId() customerId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() voucherCode?: string;
-  @ApiProperty({ type: [InvoiceItemDto] }) @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => InvoiceItemDto) items: InvoiceItemDto[];
+  @ApiProperty({ type: [InvoiceItemDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InvoiceItemDto)
+  items: InvoiceItemDto[];
 }
 export class NewInvoiceCustomerDto {
   @ApiProperty() @IsString() name: string;
   @ApiPropertyOptional() @IsOptional() @IsString() phone?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() address?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() latitude?: number;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Number) @IsNumber() longitude?: number;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  latitude?: number;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  longitude?: number;
 }
 export class GiftSelectionItemDto {
   @ApiProperty() @IsMongoId() productId: string;
@@ -38,44 +72,96 @@ export class GiftSelectionItemDto {
 }
 export class GiftSelectionDto {
   @ApiProperty() @IsString() groupCode: string;
-  @ApiProperty({ type: [GiftSelectionItemDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => GiftSelectionItemDto) items: GiftSelectionItemDto[];
+  @ApiProperty({ type: [GiftSelectionItemDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GiftSelectionItemDto)
+  items: GiftSelectionItemDto[];
 }
 export class PromotionApplicationDto {
   @ApiProperty() @IsMongoId() promotionId: string;
-  @ApiProperty({ type: [GiftSelectionDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => GiftSelectionDto) giftSelections: GiftSelectionDto[];
+  @ApiProperty({ type: [GiftSelectionDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GiftSelectionDto)
+  giftSelections: GiftSelectionDto[];
 }
 export class GiftPromotionPreviewDto {
   @ApiPropertyOptional() @IsOptional() @IsMongoId() customerId?: string;
-  @ApiProperty({ type: [InvoiceItemDto] }) @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => InvoiceItemDto) items: InvoiceItemDto[];
+  @ApiProperty({ type: [InvoiceItemDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => InvoiceItemDto)
+  items: InvoiceItemDto[];
 }
 export class ApplyGiftPromotionDto extends GiftPromotionPreviewDto {
   @ApiProperty() @IsMongoId() promotionId: string;
-  @ApiProperty({ type: [GiftSelectionDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => GiftSelectionDto) giftSelections: GiftSelectionDto[];
+  @ApiProperty({ type: [GiftSelectionDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GiftSelectionDto)
+  giftSelections: GiftSelectionDto[];
 }
 export class CreateInvoiceDto extends InvoicePreviewDto {
-  @ApiPropertyOptional({ type: NewInvoiceCustomerDto }) @IsOptional() @ValidateNested() @Type(() => NewInvoiceCustomerDto) newCustomer?: NewInvoiceCustomerDto;
+  @ApiPropertyOptional({ type: NewInvoiceCustomerDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => NewInvoiceCustomerDto)
+  newCustomer?: NewInvoiceCustomerDto;
   @ApiPropertyOptional() @IsOptional() @IsString() code?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() date?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() customer?: string;
-  @ApiProperty({ enum: ['warehouse', 'truck'] }) @IsEnum(['warehouse', 'truck']) sourceType: 'warehouse' | 'truck';
+  @ApiProperty({ enum: ['warehouse', 'truck'] })
+  @IsEnum(['warehouse', 'truck'])
+  sourceType: 'warehouse' | 'truck';
   @ApiPropertyOptional() @IsOptional() @IsMongoId() truckId?: string;
-  @ApiPropertyOptional({ description: 'Required for admin; inferred from JWT for staff' }) @IsOptional() @IsMongoId() salespersonId?: string;
-  @ApiProperty({ type: [InvoicePaymentDto] }) @IsArray() @ValidateNested({ each: true }) @Type(() => InvoicePaymentDto) payments: InvoicePaymentDto[];
+  @ApiPropertyOptional({
+    description: 'Required for admin; inferred from JWT for staff',
+  })
+  @IsOptional()
+  @IsMongoId()
+  salespersonId?: string;
+  @ApiProperty({ type: [InvoicePaymentDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InvoicePaymentDto)
+  payments: InvoicePaymentDto[];
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean() allowDebtLimitOverride?: boolean;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  allowDebtLimitOverride?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() applyExcessToDebt?: boolean;
   @ApiPropertyOptional() @IsOptional() @IsString() debtOverrideReason?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() paymentDueDate?: string;
-  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) paymentTermDays?: number;
-  @ApiPropertyOptional({ type: [PromotionApplicationDto] }) @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PromotionApplicationDto) promotionApplications?: PromotionApplicationDto[];
-  @ApiPropertyOptional({ type: [InvoiceGiftDto] }) @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => InvoiceGiftDto) gifts?: InvoiceGiftDto[];
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  paymentTermDays?: number;
+  @ApiPropertyOptional({ type: [PromotionApplicationDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PromotionApplicationDto)
+  promotionApplications?: PromotionApplicationDto[];
+  @ApiPropertyOptional({ type: [InvoiceGiftDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InvoiceGiftDto)
+  gifts?: InvoiceGiftDto[];
 }
 export class InvoiceQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsMongoId() salespersonId?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() from?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() to?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
-  @ApiPropertyOptional({ enum: InvoicePaymentStatus }) @IsOptional() @IsEnum(InvoicePaymentStatus) paymentStatus?: InvoicePaymentStatus;
+  @ApiPropertyOptional({ enum: InvoicePaymentStatus })
+  @IsOptional()
+  @IsEnum(InvoicePaymentStatus)
+  paymentStatus?: InvoicePaymentStatus;
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
 }

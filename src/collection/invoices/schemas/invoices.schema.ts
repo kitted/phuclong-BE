@@ -2,14 +2,33 @@ import { index, prop, Ref } from '@typegoose/typegoose';
 import { BaseModel } from '../../../core/base.model';
 import { Products } from '../../products/schemas/products.schema';
 import { Trucks } from '../../trucks/schemas/trucks.schema';
-import { CustomerCodeStatus, Customers } from '../../customers/schemas/customers.schema';
-import { Promotions, Vouchers } from '../../promotions/schemas/promotions.schema';
+import {
+  CustomerCodeStatus,
+  Customers,
+} from '../../customers/schemas/customers.schema';
+import {
+  Promotions,
+  Vouchers,
+} from '../../promotions/schemas/promotions.schema';
 import { Users } from '../../users/schemas/users.schema';
 
-export enum PaymentMethod { CASH = 'CASH', BANK_TRANSFER = 'BANK_TRANSFER' }
-export enum InvoicePaymentStatus { UNPAID = 'UNPAID', PARTIAL = 'PARTIAL', PAID = 'PAID' }
-export enum InvoiceStatus { ACTIVE = 'ACTIVE', REVERSED = 'REVERSED' }
-export enum InvoiceLineType { SALE = 'SALE', GIFT = 'GIFT' }
+export enum PaymentMethod {
+  CASH = 'CASH',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+}
+export enum InvoicePaymentStatus {
+  UNPAID = 'UNPAID',
+  PARTIAL = 'PARTIAL',
+  PAID = 'PAID',
+}
+export enum InvoiceStatus {
+  ACTIVE = 'ACTIVE',
+  REVERSED = 'REVERSED',
+}
+export enum InvoiceLineType {
+  SALE = 'SALE',
+  GIFT = 'GIFT',
+}
 
 export class InvoicePayment {
   @prop({ required: true, enum: PaymentMethod }) method: PaymentMethod;
@@ -44,7 +63,10 @@ export class InvoiceItem {
   @prop({ min: 0 }) unitPriceOverride?: number;
   @prop({ ref: () => Users }) priceOverriddenBy?: Ref<Users>;
   @prop({ required: true, min: 0 }) lineTotal: number;
-  @prop({ enum: InvoiceLineType, default: InvoiceLineType.SALE }) lineType: InvoiceLineType;
+  @prop({ enum: InvoiceLineType, default: InvoiceLineType.SALE })
+  lineType: InvoiceLineType;
+  @prop({ enum: ['warehouse', 'truck'] }) inventorySourceType?: string;
+  @prop({ ref: () => Trucks }) inventorySourceTruckId?: Ref<Trucks>;
   @prop({ min: 0 }) originalPrice?: number;
   @prop({ default: 0, min: 0 }) costPrice: number;
 }
@@ -71,15 +93,18 @@ export class InvoiceMatchedConditionGroup {
   @prop({ required: true }) combination: string;
   @prop({ required: true }) eligible: boolean;
   @prop({ required: true }) applicationCount: number;
-  @prop({ type: () => [InvoiceMatchedCondition], default: [] }) conditions: InvoiceMatchedCondition[];
+  @prop({ type: () => [InvoiceMatchedCondition], default: [] })
+  conditions: InvoiceMatchedCondition[];
 }
 export class InvoicePromotionApplication {
   @prop({ ref: () => Promotions, required: true }) promotionId: Ref<Promotions>;
   @prop({ required: true }) promotionCode: string;
   @prop({ required: true }) promotionName: string;
   @prop({ required: true, min: 1 }) applicationCount: number;
-  @prop({ type: () => [InvoiceMatchedConditionGroup], default: [] }) matchedConditions: InvoiceMatchedConditionGroup[];
-  @prop({ type: () => [InvoicePromotionGift], default: [] }) gifts: InvoicePromotionGift[];
+  @prop({ type: () => [InvoiceMatchedConditionGroup], default: [] })
+  matchedConditions: InvoiceMatchedConditionGroup[];
+  @prop({ type: () => [InvoicePromotionGift], default: [] })
+  gifts: InvoicePromotionGift[];
   @prop() activationId?: string;
   @prop() activationCode?: string;
 }
@@ -95,13 +120,15 @@ export class InvoicePromotionApplication {
 export class Invoices extends BaseModel {
   @prop({ required: true, unique: true }) code: string;
   @prop({ required: true }) date: Date;
-  @prop({ enum: InvoiceStatus, default: InvoiceStatus.ACTIVE, index: true }) status: InvoiceStatus;
+  @prop({ enum: InvoiceStatus, default: InvoiceStatus.ACTIVE, index: true })
+  status: InvoiceStatus;
   @prop() reversedAt?: Date;
   @prop({ ref: () => Users }) reversedBy?: Ref<Users>;
   @prop() reversalReason?: string;
   @prop() reversalCode?: string;
   @prop({ default: 'Khách lẻ' }) customer: string;
-  @prop({ ref: () => Customers, default: null, index: true }) customerId?: Ref<Customers>;
+  @prop({ ref: () => Customers, default: null, index: true })
+  customerId?: Ref<Customers>;
   @prop() customerCode?: string;
   @prop({ enum: CustomerCodeStatus }) customerCodeStatus?: CustomerCodeStatus;
   @prop() customerName?: string;
@@ -113,7 +140,8 @@ export class Invoices extends BaseModel {
   @prop({ default: 0, min: 0 }) discountAmount: number;
   @prop({ required: true, min: 0 }) grandTotal: number;
   @prop({ required: true, min: 0 }) totalAmount: number;
-  @prop({ type: () => [InvoicePayment], default: [] }) payments: InvoicePayment[];
+  @prop({ type: () => [InvoicePayment], default: [] })
+  payments: InvoicePayment[];
   @prop({ default: 0, min: 0 }) paidAmount: number;
   @prop({ default: 0, min: 0 }) receivedAmount: number;
   @prop({ default: 0, min: 0 }) existingDebtPaidAmount: number;
@@ -126,10 +154,12 @@ export class Invoices extends BaseModel {
   @prop({ default: 0, min: 0 }) initialDebtAmount: number;
   @prop() paymentDueDate?: Date;
   @prop({ min: 0 }) paymentTermDays?: number;
-  @prop({ type: () => [InvoiceDebtPayment], default: [] }) debtPayments: InvoiceDebtPayment[];
+  @prop({ type: () => [InvoiceDebtPayment], default: [] })
+  debtPayments: InvoiceDebtPayment[];
   @prop({ default: false }) debtLimitOverridden: boolean;
   @prop() debtOverrideReason?: string;
-  @prop({ enum: InvoicePaymentStatus, default: InvoicePaymentStatus.UNPAID }) paymentStatus: InvoicePaymentStatus;
+  @prop({ enum: InvoicePaymentStatus, default: InvoicePaymentStatus.UNPAID })
+  paymentStatus: InvoicePaymentStatus;
   @prop({ ref: () => Promotions }) promotionId?: Ref<Promotions>;
   @prop() promotionCode?: string;
   @prop() promotionName?: string;
@@ -138,8 +168,10 @@ export class Invoices extends BaseModel {
   @prop() voucherCode?: string;
   @prop() discountType?: string;
   @prop() discountValue?: number;
-  @prop({ type: () => [InvoicePromotionApplication], default: [] }) promotionApplications: InvoicePromotionApplication[];
-  @prop({ ref: () => Users, required: true, index: true }) salespersonId: Ref<Users>;
+  @prop({ type: () => [InvoicePromotionApplication], default: [] })
+  promotionApplications: InvoicePromotionApplication[];
+  @prop({ ref: () => Users, required: true, index: true })
+  salespersonId: Ref<Users>;
   @prop({ required: true }) salespersonCode: string;
   @prop({ required: true }) salespersonName: string;
   @prop({ ref: () => Users }) createdBy?: Ref<Users>;

@@ -52,7 +52,9 @@ import { PromotionRuleEngineService } from './promotion-rule-engine.service';
 import { PromotionActivationsService } from '../promotion-activations/promotion-activations.service';
 import {
   PromotionActivations,
+  PromotionActivationSource,
   PromotionActivationStatus,
+  PromotionStockSource,
 } from '../promotion-activations/schemas/promotion-activations.schema';
 import { InvoiceQueryDto } from './dtos/invoices.dto';
 import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
@@ -121,8 +123,8 @@ export function canViewAllCompanyInvoices(user: {
 }) {
   const role = String(user.role || '').toLowerCase();
   return (
-    role === RoleEnum.ADMIN ||
-    (role === RoleEnum.STAFF && user.canViewAllInvoices === true)
+    role === String(RoleEnum.ADMIN) ||
+    (role === String(RoleEnum.STAFF) && user.canViewAllInvoices === true)
   );
 }
 
@@ -134,7 +136,9 @@ export class InvoicesService {
     @InjectModel(Products)
     private readonly productModel: ReturnModelType<typeof Products>,
     @InjectModel(WebsiteProducts)
-    private readonly websiteProductModel: ReturnModelType<typeof WebsiteProducts>,
+    private readonly websiteProductModel: ReturnModelType<
+      typeof WebsiteProducts
+    >,
     @InjectModel(Trucks)
     private readonly truckModel: ReturnModelType<typeof Trucks>,
     @InjectModel(Customers)
@@ -188,7 +192,10 @@ export class InvoicesService {
     ];
     if (!ids.length) return documents;
     const [products, linked] = await Promise.all([
-      this.productModel.find({ _id: { $in: ids } }).select('imageUrl').lean(),
+      this.productModel
+        .find({ _id: { $in: ids } })
+        .select('imageUrl')
+        .lean(),
       this.websiteProductModel
         .find({ isDeleted: { $ne: true }, inventoryProductId: { $in: ids } })
         .select('inventoryProductId imageUrls')
@@ -261,7 +268,10 @@ export class InvoicesService {
     session?: ClientSession,
     actorId?: string,
   ) {
-    if (!Array.isArray(dto.items) || !dto.items.length)
+    if (
+      !Array.isArray(dto.items) ||
+      (!dto.items.length && !dto.voucherCode?.trim())
+    )
       throw new BadRequestException('Hóa đơn phải có ít nhất một sản phẩm');
     const requested = dto.items.map((item) => {
       if (
@@ -349,85 +359,156 @@ export class InvoicesService {
     let discountAmount = 0;
     let promotion: any = null;
     let voucher: any = null;
+    let manualActivation: any = null;
+    let manualGift: any = null;
     let eligibleItems: any[] = [];
 
     if (dto.voucherCode?.trim()) {
-      if (!dto.customerId)
-        throw new BadRequestException('Voucher chỉ áp dụng cho khách hàng CRM');
-      voucher = await this.voucherModel
+      const normalizedCode = dto.voucherCode.trim().toUpperCase();
+      manualActivation = await this.activationModel
         .findOne({
-          code: dto.voucherCode.trim().toUpperCase(),
-          customerId: dto.customerId,
-          status: VoucherStatus.ACTIVE,
+          code: normalizedCode,
+          source: PromotionActivationSource.MANUAL,
           isDeleted: false,
         })
         .session(session || null)
         .lean();
-      if (!voucher)
-        throw new ConflictException(
-          'Voucher không tồn tại, không thuộc khách hàng hoặc đã được sử dụng',
-        );
-      promotion = await this.promotionModel
-        .findOne({ _id: voucher.promotionId, isDeleted: false })
-        .session(session || null)
-        .lean();
-      const now = new Date();
-      if (
-        !promotion ||
-        promotion.status !== PromotionStatus.ACTIVE ||
-        now < promotion.startAt ||
-        now > promotion.endAt ||
-        now > voucher.expiresAt
-      )
-        throw new ConflictException(
-          'Chương trình hoặc voucher không còn hiệu lực',
-        );
-      if (subtotal < promotion.minOrderValue)
-        throw new ConflictException(
-          'Hóa đơn chưa đạt giá trị tối thiểu của chương trình',
-        );
-      const categoryIds = new Set((promotion.categoryIds || []).map(String));
-      const productIds = new Set((promotion.productIds || []).map(String));
-      const eligible = items.filter(
-        (item) =>
-          promotion.scope === PromotionScope.ALL ||
-          (promotion.scope === PromotionScope.CATEGORY &&
-            item.categoryId &&
-            categoryIds.has(item.categoryId)) ||
-          (promotion.scope === PromotionScope.PRODUCTS &&
-            productIds.has(item.productId)) ||
-          (promotion.scope === PromotionScope.PRODUCT_TYPE &&
-            String(item.productType).toLocaleLowerCase('vi') ===
-              String(promotion.productType).toLocaleLowerCase('vi')),
-      );
-      const eligibleAmount = eligible.reduce(
-        (sum, item) => sum + item.lineTotal,
-        0,
-      );
-      if (eligibleAmount <= 0)
-        throw new ConflictException(
-          'Không có sản phẩm nào đủ điều kiện áp dụng voucher',
-        );
-      discountAmount =
-        promotion.discountType === DiscountType.PERCENT
-          ? (eligibleAmount * promotion.discountValue) / 100
-          : promotion.discountValue;
-      if (promotion.maxDiscount > 0)
-        discountAmount = Math.min(discountAmount, promotion.maxDiscount);
-      discountAmount = Math.min(Math.round(discountAmount), eligibleAmount);
-      let allocated = 0;
-      eligibleItems = eligible.map((item, index) => {
-        const amount =
-          index === eligible.length - 1
-            ? discountAmount - allocated
-            : Math.round((discountAmount * item.lineTotal) / eligibleAmount);
-        allocated += amount;
-        return {
-          productId: item.productId,
-          eligibleAmount: item.lineTotal,
-          discountAmount: amount,
+      if (manualActivation) {
+        if (manualActivation.status !== PromotionActivationStatus.ACTIVE)
+          throw new ConflictException({
+            code: 'PROMOTION_CODE_NOT_ACTIVE',
+            message:
+              manualActivation.status === PromotionActivationStatus.USED
+                ? 'Mã khuyến mãi đã được sử dụng'
+                : 'Mã khuyến mãi không còn hoạt động',
+          });
+        if (
+          dto.customerId &&
+          String(manualActivation.customerId) !== String(dto.customerId)
+        )
+          throw new ConflictException({
+            code: 'PROMOTION_CODE_CUSTOMER_MISMATCH',
+            message: 'Mã khuyến mãi không thuộc khách hàng đã chọn',
+          });
+        const giftProduct: any = await this.productModel
+          .findOne({
+            _id: manualActivation.productId,
+            isDeleted: { $ne: true },
+          })
+          .session(session || null)
+          .lean();
+        if (!giftProduct)
+          throw new ConflictException(
+            'Sản phẩm quà tặng của mã không còn hoạt động',
+          );
+        let availableStock = Number(giftProduct.stock || 0);
+        if (
+          manualActivation.stockSource === PromotionStockSource.TRUCK &&
+          manualActivation.sourceTruckId
+        ) {
+          const sourceTruck: any = await this.truckModel
+            .findOne({
+              _id: manualActivation.sourceTruckId,
+              isDeleted: { $ne: true },
+            })
+            .select('inventory')
+            .session(session || null)
+            .lean();
+          availableStock = Number(
+            (sourceTruck?.inventory || []).find(
+              (entry) => String(entry.productId) === String(giftProduct._id),
+            )?.qty || 0,
+          );
+        }
+        manualGift = {
+          productId: String(giftProduct._id),
+          productCode: giftProduct.code,
+          productName: giftProduct.name,
+          unit: giftProduct.unit || '',
+          imageUrl: giftProduct.imageUrl || '',
+          stock: availableStock,
+          qty: Number(manualActivation.giftQuantity) || 1,
         };
-      });
+      } else {
+        if (!dto.customerId)
+          throw new BadRequestException(
+            'Voucher chỉ áp dụng cho khách hàng CRM',
+          );
+        voucher = await this.voucherModel
+          .findOne({
+            code: normalizedCode,
+            customerId: dto.customerId,
+            status: VoucherStatus.ACTIVE,
+            isDeleted: false,
+          })
+          .session(session || null)
+          .lean();
+        if (!voucher)
+          throw new ConflictException(
+            'Voucher không tồn tại, không thuộc khách hàng hoặc đã được sử dụng',
+          );
+        promotion = await this.promotionModel
+          .findOne({ _id: voucher.promotionId, isDeleted: false })
+          .session(session || null)
+          .lean();
+        const now = new Date();
+        if (
+          !promotion ||
+          promotion.status !== PromotionStatus.ACTIVE ||
+          now < promotion.startAt ||
+          now > promotion.endAt ||
+          now > voucher.expiresAt
+        )
+          throw new ConflictException(
+            'Chương trình hoặc voucher không còn hiệu lực',
+          );
+        if (subtotal < promotion.minOrderValue)
+          throw new ConflictException(
+            'Hóa đơn chưa đạt giá trị tối thiểu của chương trình',
+          );
+        const categoryIds = new Set((promotion.categoryIds || []).map(String));
+        const productIds = new Set((promotion.productIds || []).map(String));
+        const eligible = items.filter(
+          (item) =>
+            promotion.scope === PromotionScope.ALL ||
+            (promotion.scope === PromotionScope.CATEGORY &&
+              item.categoryId &&
+              categoryIds.has(item.categoryId)) ||
+            (promotion.scope === PromotionScope.PRODUCTS &&
+              productIds.has(item.productId)) ||
+            (promotion.scope === PromotionScope.PRODUCT_TYPE &&
+              String(item.productType).toLocaleLowerCase('vi') ===
+                String(promotion.productType).toLocaleLowerCase('vi')),
+        );
+        const eligibleAmount = eligible.reduce(
+          (sum, item) => sum + item.lineTotal,
+          0,
+        );
+        if (eligibleAmount <= 0)
+          throw new ConflictException(
+            'Không có sản phẩm nào đủ điều kiện áp dụng voucher',
+          );
+        discountAmount =
+          promotion.discountType === DiscountType.PERCENT
+            ? (eligibleAmount * promotion.discountValue) / 100
+            : promotion.discountValue;
+        if (promotion.maxDiscount > 0)
+          discountAmount = Math.min(discountAmount, promotion.maxDiscount);
+        discountAmount = Math.min(Math.round(discountAmount), eligibleAmount);
+        let allocated = 0;
+        eligibleItems = eligible.map((item, index) => {
+          const amount =
+            index === eligible.length - 1
+              ? discountAmount - allocated
+              : Math.round((discountAmount * item.lineTotal) / eligibleAmount);
+          allocated += amount;
+          return {
+            productId: item.productId,
+            eligibleAmount: item.lineTotal,
+            discountAmount: amount,
+          };
+        });
+      }
     }
     const grandTotal = subtotal - discountAmount;
     return {
@@ -437,6 +518,8 @@ export class InvoicesService {
       grandTotal,
       promotion,
       voucher,
+      manualActivation,
+      manualGift,
       eligibleItems,
     };
   }
@@ -497,6 +580,23 @@ export class InvoicesService {
               discountValue: calculated.promotion.discountValue,
               maxDiscount: calculated.promotion.maxDiscount,
               scope: calculated.promotion.scope,
+            }
+          : null,
+        manualPromotionCode: calculated.manualActivation
+          ? {
+              id: String(calculated.manualActivation._id),
+              code: calculated.manualActivation.code,
+              customerId: String(calculated.manualActivation.customerId),
+              customerCode: calculated.manualActivation.customerCode,
+              customerName: calculated.manualActivation.customerName,
+              customerPhone: calculated.manualActivation.customerPhone,
+              stockSource: calculated.manualActivation.stockSource,
+              sourceTruckId: calculated.manualActivation.sourceTruckId
+                ? String(calculated.manualActivation.sourceTruckId)
+                : null,
+              sourceTruckCode: calculated.manualActivation.sourceTruckCode,
+              sourceTruckName: calculated.manualActivation.sourceTruckName,
+              gift: calculated.manualGift,
             }
           : null,
         eligibleItems: calculated.eligibleItems,
@@ -664,7 +764,37 @@ export class InvoicesService {
           )[0];
         }
         const calculated = await this.calculate(dto, session, actor.id);
-        const directGiftLines = await this.directGiftLines(dto.gifts, session);
+        if (
+          calculated.manualActivation &&
+          (!customer ||
+            String(customer._id) !==
+              String(calculated.manualActivation.customerId))
+        )
+          throw new ConflictException({
+            code: 'PROMOTION_CODE_CUSTOMER_REQUIRED',
+            message: 'Hóa đơn phải chọn đúng khách hàng của mã khuyến mãi',
+          });
+        const giftInputs = [...(dto.gifts || [])];
+        if (calculated.manualGift) {
+          const matchingGift = giftInputs.find(
+            (gift) =>
+              String(gift.productId) ===
+              String(calculated.manualGift.productId),
+          );
+          if (
+            matchingGift &&
+            Number(matchingGift.qty) !== Number(calculated.manualGift.qty)
+          )
+            throw new BadRequestException(
+              `Sản phẩm từ mã khuyến mãi phải có số lượng ${calculated.manualGift.qty}`,
+            );
+          if (!matchingGift)
+            giftInputs.push({
+              productId: calculated.manualGift.productId,
+              qty: calculated.manualGift.qty,
+            });
+        }
+        const directGiftLines = await this.directGiftLines(giftInputs, session);
         const giftRequest = dto.promotionApplications?.[0];
         const giftApplication = giftRequest
           ? await this.ruleEngine.apply(
@@ -691,6 +821,25 @@ export class InvoicesService {
           ...giftLines,
           ...directGiftLines,
         ];
+        const manualGiftLine: any = calculated.manualGift
+          ? directGiftLines.find(
+              (line) =>
+                String(line.productId) ===
+                String(calculated.manualGift.productId),
+            )
+          : null;
+        if (manualGiftLine) {
+          manualGiftLine.inventorySourceType =
+            calculated.manualActivation.stockSource ===
+            PromotionStockSource.WAREHOUSE
+              ? 'warehouse'
+              : 'truck';
+          manualGiftLine.inventorySourceTruckId =
+            calculated.manualActivation.sourceTruckId || undefined;
+        }
+        const regularInventoryLines = manualGiftLine
+          ? inventoryLines.filter((line) => line !== manualGiftLine)
+          : inventoryLines;
         const receivedAmount = payments.reduce(
           (sum, payment) => sum + payment.amount,
           0,
@@ -770,7 +919,7 @@ export class InvoicesService {
         }
         const movementInputs: any[] = [];
         const inventoryGroups = new Map<string, any[]>();
-        for (const item of inventoryLines)
+        for (const item of regularInventoryLines)
           inventoryGroups.set(String(item.productId), [
             ...(inventoryGroups.get(String(item.productId)) || []),
             item,
@@ -872,12 +1021,89 @@ export class InvoicesService {
             { session },
           );
         }
+        if (manualGiftLine) {
+          const fromWarehouse =
+            calculated.manualActivation.stockSource ===
+            PromotionStockSource.WAREHOUSE;
+          if (fromWarehouse) {
+            const before: any = await this.productModel.findOneAndUpdate(
+              {
+                _id: manualGiftLine.productId,
+                isDeleted: false,
+                stock: { $gte: manualGiftLine.qty },
+              },
+              { $inc: { stock: -manualGiftLine.qty } },
+              { new: false, session },
+            );
+            if (!before)
+              throw new ConflictException({
+                code: 'INSUFFICIENT_GIFT_STOCK',
+                message: 'Kho chính không đủ sản phẩm để tặng theo mã',
+                details: { productId: manualGiftLine.productId },
+              });
+            movementInputs.push({
+              productId: manualGiftLine.productId,
+              type: InventoryMovementType.INVOICE_GIFT_FROM_WAREHOUSE,
+              quantityChange: -manualGiftLine.qty,
+              quantityBefore: before.stock,
+              quantityAfter: before.stock - manualGiftLine.qty,
+              sourceType: InventoryLocationType.WAREHOUSE,
+            });
+          } else {
+            const sourceTruckId = calculated.manualActivation.sourceTruckId;
+            const before: any = await this.truckModel.findOneAndUpdate(
+              {
+                _id: sourceTruckId,
+                isDeleted: false,
+                inventory: {
+                  $elemMatch: {
+                    productId: manualGiftLine.productId,
+                    qty: { $gte: manualGiftLine.qty },
+                  },
+                },
+              },
+              { $inc: { 'inventory.$.qty': -manualGiftLine.qty } },
+              { new: false, session },
+            );
+            if (!before)
+              throw new ConflictException({
+                code: 'INSUFFICIENT_GIFT_STOCK',
+                message:
+                  `Xe ${calculated.manualActivation.sourceTruckCode || calculated.manualActivation.sourceTruckName || ''} không đủ sản phẩm để tặng theo mã`.trim(),
+                details: {
+                  truckId: String(sourceTruckId || ''),
+                  productId: manualGiftLine.productId,
+                },
+              });
+            const quantityBefore =
+              before.inventory.find(
+                (entry) =>
+                  String(entry.productId) === String(manualGiftLine.productId),
+              )?.qty || 0;
+            movementInputs.push({
+              productId: manualGiftLine.productId,
+              type: InventoryMovementType.INVOICE_GIFT_FROM_TRUCK,
+              quantityChange: -manualGiftLine.qty,
+              quantityBefore,
+              quantityAfter: quantityBefore - manualGiftLine.qty,
+              sourceType: InventoryLocationType.TRUCK,
+              sourceTruckId,
+            });
+            await this.truckModel.updateOne(
+              { _id: sourceTruckId },
+              { $pull: { inventory: { qty: { $lte: 0 } } } },
+              { session },
+            );
+          }
+        }
         const paymentStatus =
-          paidAmount === 0
-            ? InvoicePaymentStatus.UNPAID
-            : paidAmount < calculated.grandTotal
-              ? InvoicePaymentStatus.PARTIAL
-              : InvoicePaymentStatus.PAID;
+          calculated.grandTotal <= 0
+            ? InvoicePaymentStatus.PAID
+            : paidAmount === 0
+              ? InvoicePaymentStatus.UNPAID
+              : paidAmount < calculated.grandTotal
+                ? InvoicePaymentStatus.PARTIAL
+                : InvoicePaymentStatus.PAID;
         const paymentDueDate = dto.paymentDueDate
           ? new Date(dto.paymentDueDate)
           : dto.paymentTermDays
@@ -922,7 +1148,8 @@ export class InvoicesService {
                 promotionCode: calculated.promotion?.code,
                 promotionName: calculated.promotion?.name,
                 voucherId: calculated.voucher?._id,
-                voucherCode: calculated.voucher?.code,
+                voucherCode:
+                  calculated.voucher?.code || calculated.manualActivation?.code,
                 discountType: calculated.promotion?.discountType,
                 discountValue: calculated.promotion?.discountValue,
                 promotionApplications: giftApplication
@@ -951,7 +1178,11 @@ export class InvoicesService {
             dto.newCustomer,
             String(customer._id),
             String(invoice._id),
-            { id: String(salesperson._id), name: salesperson.fullName || salesperson.username },
+            {
+              id: String(salesperson._id),
+              name: salesperson.fullName || salesperson.username,
+              employeeCode: salesperson.employeeCode || undefined,
+            },
             session,
           );
         }
@@ -1003,6 +1234,32 @@ export class InvoicesService {
             { $inc: { used: 1 } },
             { session },
           );
+        }
+        if (calculated.manualActivation) {
+          const claimed = await this.activationModel.findOneAndUpdate(
+            {
+              _id: calculated.manualActivation._id,
+              source: PromotionActivationSource.MANUAL,
+              status: PromotionActivationStatus.ACTIVE,
+            },
+            {
+              $set: {
+                status: PromotionActivationStatus.USED,
+                usedAt: new Date(),
+                invoiceId: invoice._id,
+                invoiceCode: code,
+                statusChangedAt: new Date(),
+                statusChangedBy: actor.id || undefined,
+              },
+              $unset: { statusReason: 1 },
+            },
+            { new: true, session },
+          );
+          if (!claimed)
+            throw new ConflictException({
+              code: 'PROMOTION_CODE_ALREADY_USED',
+              message: 'Mã khuyến mãi đã được sử dụng bởi giao dịch khác',
+            });
         }
         if (giftApplication)
           await this.promotionModel.updateOne(
@@ -1318,7 +1575,10 @@ export class InvoicesService {
 
         const reversalMovements: any[] = [];
         for (const item of invoice.items || []) {
-          if (invoice.sourceType === 'warehouse') {
+          const itemSourceType = item.inventorySourceType || invoice.sourceType;
+          const itemSourceTruckId =
+            item.inventorySourceTruckId || invoice.truckId;
+          if (itemSourceType === 'warehouse') {
             const before: any = await this.productModel.findOneAndUpdate(
               { _id: item.productId, isDeleted: false },
               { $inc: { stock: item.qty } },
@@ -1336,7 +1596,7 @@ export class InvoicesService {
             });
           } else {
             const truck: any = await this.truckModel
-              .findOne({ _id: invoice.truckId, isDeleted: false })
+              .findOne({ _id: itemSourceTruckId, isDeleted: false })
               .session(session);
             if (!truck)
               throw new ConflictException(
@@ -1623,7 +1883,10 @@ export class InvoicesService {
         .sort({ date: -1, createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
-        .populate('customerId', 'code name phone phones address storefrontImage')
+        .populate(
+          'customerId',
+          'code name phone phones address storefrontImage',
+        )
         .populate('salespersonId', 'employeeCode fullName')
         .lean(),
       this.model.countDocuments(filter),
@@ -1725,7 +1988,10 @@ export class InvoicesService {
       this.model
         .find(invoiceFilter)
         .select('-__v')
-        .populate('customerId', 'code name phone phones address storefrontImage')
+        .populate(
+          'customerId',
+          'code name phone phones address storefrontImage',
+        )
         .populate('salespersonId', 'employeeCode fullName')
         .lean(),
       this.debtPaymentModel.find(receiptFilter).select('-__v').lean(),
