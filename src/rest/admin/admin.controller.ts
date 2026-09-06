@@ -67,6 +67,8 @@ import { LeadsModule } from 'src/collection/leads/leads.module';
 import { LeadsController } from './controllers/leads.controller';
 import { CustomerCoinsModule } from 'src/collection/customer-coins/customer-coins.module';
 import { CustomerCoinsController } from './controllers/customer-coins.controller';
+import { DocumentSafetyModule } from 'src/collection/document-safety/document-safety.module';
+import { DocumentSafetyController } from './controllers/document-safety.controller';
 
 @Module({
   imports: [
@@ -94,6 +96,7 @@ import { CustomerCoinsController } from './controllers/customer-coins.controller
     WebsiteContentsModule,
     LeadsModule,
     CustomerCoinsModule,
+    DocumentSafetyModule,
   ],
   controllers: [
     UsersController,
@@ -133,6 +136,7 @@ import { CustomerCoinsController } from './controllers/customer-coins.controller
     WebsiteProductsController,
     LeadsController,
     CustomerCoinsController,
+    DocumentSafetyController,
   ],
 })
 export class AdminModule {}

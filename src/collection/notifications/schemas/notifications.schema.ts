@@ -17,6 +17,7 @@ export enum NotificationType {
   WAREHOUSE_STOCK_SYNCED = 'WAREHOUSE_STOCK_SYNCED',
   WAREHOUSE_INVENTORY_RESTORED = 'WAREHOUSE_INVENTORY_RESTORED',
   PRODUCT_AUTO_ADDED = 'PRODUCT_AUTO_ADDED',
+  DOCUMENT_DAY_REVERSED = 'DOCUMENT_DAY_REVERSED',
 }
 
 @index({ recipientId: 1, readAt: 1, createdAt: -1 })
@@ -25,7 +26,9 @@ export class Notifications extends BaseModel {
   @prop({ enum: NotificationType, required: true }) type: NotificationType;
   @prop({ required: true }) title: string;
   @prop({ required: true }) message: string;
-  @prop({ enum: ['ADMIN', 'STAFF'], required: true }) audience: 'ADMIN' | 'STAFF';
+  @prop({ enum: ['ADMIN', 'STAFF'], required: true }) audience:
+    | 'ADMIN'
+    | 'STAFF';
   @prop({ ref: () => Users }) recipientId?: Ref<Users>;
   @prop() entityType?: string;
   @prop() entityId?: string;
