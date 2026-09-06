@@ -15,6 +15,9 @@ export class DailyManualAdjustmentDto {
 }
 export class CreateDailyReportDto {
   @IsDateString() date: string;
+  @IsOptional() @IsString() area?: string;
+  @IsOptional() @IsString() performerName?: string;
+  @IsOptional() @IsString() vehicle?: string;
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -24,6 +27,9 @@ export class CreateDailyReportDto {
   @IsOptional() @IsString() issues?: string;
 }
 export class UpdateDailyReportDto {
+  @IsOptional() @IsString() area?: string;
+  @IsOptional() @IsString() performerName?: string;
+  @IsOptional() @IsString() vehicle?: string;
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

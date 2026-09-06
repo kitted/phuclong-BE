@@ -45,12 +45,25 @@ export class DailyReportsService {
     private receipts: ReturnModelType<typeof DebtPayments>,
     @InjectModel(CustomerReturns)
     private returns: ReturnModelType<typeof CustomerReturns>,
-    @InjectModel(Products) private productsModel: ReturnModelType<typeof Products>,
+    @InjectModel(Products)
+    private productsModel: ReturnModelType<typeof Products>,
     @InjectModel(Customers)
     private customers: ReturnModelType<typeof Customers>,
     @InjectModel(WebsiteProducts)
     private websiteProducts: ReturnModelType<typeof WebsiteProducts>,
   ) {}
+
+  private paymentMethodLabel(payments: any[] = []): string {
+    const methods = new Set(
+      payments
+        .filter((payment) => Number(payment?.amount || 0) > 0)
+        .map((payment) =>
+          payment.method === PaymentMethod.CASH ? 'TM' : 'CK',
+        ),
+    );
+    return [...methods].join('+');
+  }
+
   async preview(date: string) {
     const from = vietnamDateBoundary(date, false),
       to = vietnamDateBoundary(date, true),
@@ -96,6 +109,7 @@ export class DailyReportsService {
         customerId: x.customerId ? String(x.customerId) : undefined,
         employeeName: x.salespersonName,
         amount: Number(x.grandTotal || 0),
+        paymentMethod: this.paymentMethodLabel(x.payments || []),
         note: x.note,
       });
       const e = employees.get(String(x.salespersonId)) || {
@@ -138,6 +152,7 @@ export class DailyReportsService {
         customerId: x.customerId ? String(x.customerId) : undefined,
         employeeName: x.collectorName,
         amount: Number(x.amount || 0),
+        paymentMethod: this.paymentMethodLabel(x.payments || []),
         note: x.note,
       });
     }
@@ -151,6 +166,7 @@ export class DailyReportsService {
         customerId: x.customerId ? String(x.customerId) : undefined,
         employeeName: x.driverName,
         amount: -Number(x.returnAmount || 0),
+        paymentMethod: '',
         note: x.note,
       });
     const salesRevenue = invoices.reduce(
@@ -170,32 +186,50 @@ export class DailyReportsService {
       .filter((id) => Types.ObjectId.isValid(id));
     const [adminProducts, linkedProducts, customerRows] = await Promise.all([
       productIds.length
-        ? this.productsModel.find({ _id: { $in: productIds } }).select('imageUrl').lean()
+        ? this.productsModel
+            .find({ _id: { $in: productIds } })
+            .select('imageUrl')
+            .lean()
         : [],
       productIds.length
         ? this.websiteProducts
-            .find({ isDeleted: { $ne: true }, inventoryProductId: { $in: productIds } })
+            .find({
+              isDeleted: { $ne: true },
+              inventoryProductId: { $in: productIds },
+            })
             .select('inventoryProductId imageUrls')
             .lean()
         : [],
       customerIds.length
-        ? this.customers.find({ _id: { $in: customerIds } }).select('storefrontImage').lean()
+        ? this.customers
+            .find({ _id: { $in: customerIds } })
+            .select('storefrontImage')
+            .lean()
         : [],
     ]);
     const adminImages = new Map(
-      adminProducts.map((item: any) => [String(item._id), item.imageUrl] as [string, any]),
+      adminProducts.map(
+        (item: any) => [String(item._id), item.imageUrl] as [string, any],
+      ),
     );
     const websiteImages = new Map(
-      linkedProducts.map((item: any) => [
-        String(item.inventoryProductId),
-        (item.imageUrls || []).find(Boolean),
-      ] as [string, any]),
+      linkedProducts.map(
+        (item: any) =>
+          [
+            String(item.inventoryProductId),
+            (item.imageUrls || []).find(Boolean),
+          ] as [string, any],
+      ),
     );
     const storefrontImages = new Map(
-      customerRows.map((item: any) => [String(item._id), item.storefrontImage] as [string, any]),
+      customerRows.map(
+        (item: any) =>
+          [String(item._id), item.storefrontImage] as [string, any],
+      ),
     );
     for (const item of documents)
-      item.storefrontImage = storefrontImages.get(String(item.customerId)) || item.storefrontImage;
+      item.storefrontImage =
+        storefrontImages.get(String(item.customerId)) || item.storefrontImage;
     for (const item of productRows)
       item.imageUrl =
         adminImages.get(String(item.productId)) ||
@@ -238,6 +272,9 @@ export class DailyReportsService {
         reportDate: dto.date,
         periodFrom: preview.data.period.from,
         periodTo: preview.data.period.to,
+        area: dto.area?.trim() || undefined,
+        performerName: dto.performerName?.trim() || undefined,
+        vehicle: dto.vehicle?.trim() || undefined,
         snapshot: preview.data,
         manualAdjustments: dto.manualAdjustments || [],
         notes: dto.notes,

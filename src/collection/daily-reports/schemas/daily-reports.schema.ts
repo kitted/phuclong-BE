@@ -12,6 +12,9 @@ export class DailyReports extends BaseModel {
   @prop({ required: true }) reportDate: string;
   @prop({ required: true }) periodFrom: Date;
   @prop({ required: true }) periodTo: Date;
+  @prop() area?: string;
+  @prop() performerName?: string;
+  @prop() vehicle?: string;
   @prop({ required: true }) snapshot: Record<string, unknown>;
   @prop({ type: () => [DailyManualAdjustment], default: [] })
   manualAdjustments: DailyManualAdjustment[];
