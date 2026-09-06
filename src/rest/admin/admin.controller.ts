@@ -65,6 +65,8 @@ import { WebsiteDataController } from './controllers/website-data.controller';
 import { WebsiteProductsController } from './controllers/website-products.controller';
 import { LeadsModule } from 'src/collection/leads/leads.module';
 import { LeadsController } from './controllers/leads.controller';
+import { CustomerCoinsModule } from 'src/collection/customer-coins/customer-coins.module';
+import { CustomerCoinsController } from './controllers/customer-coins.controller';
 
 @Module({
   imports: [
@@ -91,6 +93,7 @@ import { LeadsController } from './controllers/leads.controller';
     WebsiteOrdersModule,
     WebsiteContentsModule,
     LeadsModule,
+    CustomerCoinsModule,
   ],
   controllers: [
     UsersController,
@@ -129,6 +132,7 @@ import { LeadsController } from './controllers/leads.controller';
     WebsiteDataController,
     WebsiteProductsController,
     LeadsController,
+    CustomerCoinsController,
   ],
 })
 export class AdminModule {}

@@ -140,6 +140,8 @@ export class Invoices extends BaseModel {
   @prop({ default: 0, min: 0 }) discountAmount: number;
   @prop({ required: true, min: 0 }) grandTotal: number;
   @prop({ required: true, min: 0 }) totalAmount: number;
+  @prop({ default: 0, min: 0 }) invoiceCoinEarned: number;
+  @prop({ default: 0, min: 0 }) plusExCoinEarned: number;
   @prop({ type: () => [InvoicePayment], default: [] })
   payments: InvoicePayment[];
   @prop({ default: 0, min: 0 }) paidAmount: number;

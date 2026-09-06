@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectModel } from 'nestjs-typegoose';
 import { ReturnModelType } from '@typegoose/typegoose';
 import { createHash, randomBytes } from 'crypto';
@@ -29,20 +35,33 @@ import {
 import { InvoicesService } from '../invoices/invoices.service';
 import { Invoices, PaymentMethod } from '../invoices/schemas/invoices.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
-import { WebsiteProductCategories, WebsiteProducts } from './schemas/website-products.schema';
+import {
+  WebsiteProductCategories,
+  WebsiteProducts,
+} from './schemas/website-products.schema';
 
 @Injectable()
 export class WebsiteOrdersService {
   constructor(
-    @InjectModel(WebsiteOrders) private readonly orders: ReturnModelType<typeof WebsiteOrders>,
-    @InjectModel(WebsiteOrderCounters) private readonly counters: ReturnModelType<typeof WebsiteOrderCounters>,
-    @InjectModel(Products) private readonly products: ReturnModelType<typeof Products>,
-    @InjectModel(Categories) private readonly categories: ReturnModelType<typeof Categories>,
-    @InjectModel(Customers) private readonly customers: ReturnModelType<typeof Customers>,
+    @InjectModel(WebsiteOrders)
+    private readonly orders: ReturnModelType<typeof WebsiteOrders>,
+    @InjectModel(WebsiteOrderCounters)
+    private readonly counters: ReturnModelType<typeof WebsiteOrderCounters>,
+    @InjectModel(Products)
+    private readonly products: ReturnModelType<typeof Products>,
+    @InjectModel(Categories)
+    private readonly categories: ReturnModelType<typeof Categories>,
+    @InjectModel(Customers)
+    private readonly customers: ReturnModelType<typeof Customers>,
     @InjectModel(Users) private readonly users: ReturnModelType<typeof Users>,
-    @InjectModel(Invoices) private readonly invoices: ReturnModelType<typeof Invoices>,
-    @InjectModel(WebsiteProducts) private readonly websiteProducts: ReturnModelType<typeof WebsiteProducts>,
-    @InjectModel(WebsiteProductCategories) private readonly websiteCategories: ReturnModelType<typeof WebsiteProductCategories>,
+    @InjectModel(Invoices)
+    private readonly invoices: ReturnModelType<typeof Invoices>,
+    @InjectModel(WebsiteProducts)
+    private readonly websiteProducts: ReturnModelType<typeof WebsiteProducts>,
+    @InjectModel(WebsiteProductCategories)
+    private readonly websiteCategories: ReturnModelType<
+      typeof WebsiteProductCategories
+    >,
     private readonly invoicesService: InvoicesService,
   ) {}
 
@@ -55,23 +74,80 @@ export class WebsiteOrdersService {
   }
 
   private async withOrderImages(rows: any[]): Promise<any[]> {
-    const inventoryIds = [...new Set(rows.flatMap((row) => row.items || []).map((item) => String(item.inventoryProductId || '')).filter((id) => Types.ObjectId.isValid(id)))];
-    const websiteIds = [...new Set(rows.flatMap((row) => row.items || []).map((item) => String(item.websiteProductId || '')).filter((id) => Types.ObjectId.isValid(id)))];
-    const customerIds = [...new Set(rows.map((row) => String(row.customerId || '')).filter((id) => Types.ObjectId.isValid(id)))];
+    const inventoryIds = [
+      ...new Set(
+        rows
+          .flatMap((row) => row.items || [])
+          .map((item) => String(item.inventoryProductId || ''))
+          .filter((id) => Types.ObjectId.isValid(id)),
+      ),
+    ];
+    const websiteIds = [
+      ...new Set(
+        rows
+          .flatMap((row) => row.items || [])
+          .map((item) => String(item.websiteProductId || ''))
+          .filter((id) => Types.ObjectId.isValid(id)),
+      ),
+    ];
+    const customerIds = [
+      ...new Set(
+        rows
+          .map((row) => String(row.customerId || ''))
+          .filter((id) => Types.ObjectId.isValid(id)),
+      ),
+    ];
     const [inventoryProducts, websiteProducts, customers] = await Promise.all([
-      inventoryIds.length ? this.products.find({ _id: { $in: inventoryIds } }).select('imageUrl').lean() : [],
-      websiteIds.length ? this.websiteProducts.find({ _id: { $in: websiteIds }, isDeleted: { $ne: true } }).select('imageUrls').lean() : [],
-      customerIds.length ? this.customers.find({ _id: { $in: customerIds } }).select('storefrontImage').lean() : [],
+      inventoryIds.length
+        ? this.products
+            .find({ _id: { $in: inventoryIds } })
+            .select('imageUrl')
+            .lean()
+        : [],
+      websiteIds.length
+        ? this.websiteProducts
+            .find({ _id: { $in: websiteIds }, isDeleted: { $ne: true } })
+            .select('imageUrls')
+            .lean()
+        : [],
+      customerIds.length
+        ? this.customers
+            .find({ _id: { $in: customerIds } })
+            .select('storefrontImage')
+            .lean()
+        : [],
     ]);
-    const adminImages = new Map<string, any>(inventoryProducts.map((product: any) => [String(product._id), product.imageUrl] as [string, any]));
-    const websiteImages = new Map<string, any>(websiteProducts.map((product: any) => [String(product._id), (product.imageUrls || []).find(Boolean)] as [string, any]));
-    const storefrontImages = new Map<string, any>(customers.map((customer: any) => [String(customer._id), customer.storefrontImage] as [string, any]));
+    const adminImages = new Map<string, any>(
+      inventoryProducts.map(
+        (product: any) =>
+          [String(product._id), product.imageUrl] as [string, any],
+      ),
+    );
+    const websiteImages = new Map<string, any>(
+      websiteProducts.map(
+        (product: any) =>
+          [String(product._id), (product.imageUrls || []).find(Boolean)] as [
+            string,
+            any,
+          ],
+      ),
+    );
+    const storefrontImages = new Map<string, any>(
+      customers.map(
+        (customer: any) =>
+          [String(customer._id), customer.storefrontImage] as [string, any],
+      ),
+    );
     return rows.map((row) => ({
       ...row,
-      storefrontImage: storefrontImages.get(String(row.customerId)) || row.storefrontImage,
+      storefrontImage:
+        storefrontImages.get(String(row.customerId)) || row.storefrontImage,
       items: (row.items || []).map((item: any) => ({
         ...item,
-        imageUrl: adminImages.get(String(item.inventoryProductId)) || websiteImages.get(String(item.websiteProductId)) || item.imageUrl,
+        imageUrl:
+          adminImages.get(String(item.inventoryProductId)) ||
+          websiteImages.get(String(item.websiteProductId)) ||
+          item.imageUrl,
       })),
     }));
   }
@@ -102,10 +178,21 @@ export class WebsiteOrdersService {
     }
     if (q.search?.trim()) {
       const escaped = q.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter.$or = [{ code: new RegExp(escaped, 'i') }, { name: new RegExp(escaped, 'i') }];
+      filter.$or = [
+        { code: new RegExp(escaped, 'i') },
+        { name: new RegExp(escaped, 'i') },
+      ];
     }
     const [rows, total] = await Promise.all([
-      this.websiteProducts.find(filter).select('_id code name categoryId unit sellPrice slug shortDescription imageUrls inventoryProductId').sort({ name: 1 }).skip((page - 1) * limit).limit(limit).lean(),
+      this.websiteProducts
+        .find(filter)
+        .select(
+          '_id code name categoryId unit sellPrice slug shortDescription imageUrls inventoryProductId',
+        )
+        .sort({ name: 1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
       this.websiteProducts.countDocuments(filter),
     ]);
     return {
@@ -121,9 +208,19 @@ export class WebsiteOrdersService {
 
   async publicProduct(identifier: string): Promise<any> {
     const byId = /^[a-f\d]{24}$/i.test(identifier);
-    const filter: any = { isDeleted: false, isActive: true, ...(byId ? { _id: identifier } : { slug: identifier.toLowerCase() }) };
-    const product: any = await this.websiteProducts.findOne(filter).select('_id code name categoryId unit sellPrice slug shortDescription descriptionHtml imageUrls inventoryProductId').lean();
-    if (!product) throw new NotFoundException('Không tìm thấy sản phẩm trên website');
+    const filter: any = {
+      isDeleted: false,
+      isActive: true,
+      ...(byId ? { _id: identifier } : { slug: identifier.toLowerCase() }),
+    };
+    const product: any = await this.websiteProducts
+      .findOne(filter)
+      .select(
+        '_id code name categoryId unit sellPrice slug shortDescription descriptionHtml imageUrls inventoryProductId',
+      )
+      .lean();
+    if (!product)
+      throw new NotFoundException('Không tìm thấy sản phẩm trên website');
     return {
       data: {
         ...product,
@@ -154,93 +251,198 @@ export class WebsiteOrdersService {
     const filter: any = { isDeleted: false };
     if (q.search?.trim()) {
       const escaped = q.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter.$or = [{ code: new RegExp(escaped, 'i') }, { name: new RegExp(escaped, 'i') }];
+      filter.$or = [
+        { code: new RegExp(escaped, 'i') },
+        { name: new RegExp(escaped, 'i') },
+      ];
     }
-    if (q.mapped === 'true') filter.inventoryProductId = { $exists: true, $ne: null };
-    if (q.mapped === 'false') filter.$and = [{ $or: [{ inventoryProductId: null }, { inventoryProductId: { $exists: false } }] }];
+    if (q.mapped === 'true')
+      filter.inventoryProductId = { $exists: true, $ne: null };
+    if (q.mapped === 'false')
+      filter.$and = [
+        {
+          $or: [
+            { inventoryProductId: null },
+            { inventoryProductId: { $exists: false } },
+          ],
+        },
+      ];
     if (q.active === 'true') filter.isActive = true;
     if (q.active === 'false') filter.isActive = false;
     const [data, total] = await Promise.all([
-      this.websiteProducts.find(filter).sort({ name: 1 }).skip((page - 1) * limit).limit(limit).lean(),
+      this.websiteProducts
+        .find(filter)
+        .sort({ name: 1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
       this.websiteProducts.countDocuments(filter),
     ]);
-    return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    return {
+      data,
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async adminProductCategories(): Promise<any> {
-    const data = await this.websiteCategories.find({ isDeleted: false }).sort({ sortOrder: 1, name: 1 }).lean();
+    const data = await this.websiteCategories
+      .find({ isDeleted: false })
+      .sort({ sortOrder: 1, name: 1 })
+      .lean();
     return { data };
   }
 
   async adminProduct(id: string): Promise<any> {
-    const data = await this.websiteProducts.findOne({ _id: id, isDeleted: false }).lean();
+    const data = await this.websiteProducts
+      .findOne({ _id: id, isDeleted: false })
+      .lean();
     if (!data) throw new NotFoundException('Không tìm thấy sản phẩm website');
     return { data };
   }
 
   private uploadWebsiteImageBuffer(buffer: Buffer): Promise<UploadApiResponse> {
     return new Promise((resolve, reject) => {
-      const stream = cloudinary.uploader.upload_stream({ folder: 'phuclong/website-products', resource_type: 'image', overwrite: false, transformation: [{ width: 1800, height: 1800, crop: 'limit', quality: 'auto', fetch_format: 'auto' }] }, (error, result) => error || !result ? reject(error || new Error('Cloudinary không trả kết quả upload')) : resolve(result));
+      const stream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'phuclong/website-products',
+          resource_type: 'image',
+          overwrite: false,
+          transformation: [
+            {
+              width: 1800,
+              height: 1800,
+              crop: 'limit',
+              quality: 'auto',
+              fetch_format: 'auto',
+            },
+          ],
+        },
+        (error, result) =>
+          error || !result
+            ? reject(error || new Error('Cloudinary không trả kết quả upload'))
+            : resolve(result),
+      );
       stream.end(buffer);
     });
   }
 
   async uploadWebsiteProductImage(file: any): Promise<any> {
-    if (!file?.buffer) throw new BadRequestException('Vui lòng chọn ảnh sản phẩm website');
-    const cloud_name = process.env.CLOUDINARY_CLOUD_NAME, api_key = process.env.CLOUDINARY_API_KEY, api_secret = process.env.CLOUDINARY_API_SECRET;
-    if (!cloud_name || !api_key || !api_secret) throw new BadRequestException('Cloudinary chưa được cấu hình trên backend');
+    if (!file?.buffer)
+      throw new BadRequestException('Vui lòng chọn ảnh sản phẩm website');
+    const cloud_name = process.env.CLOUDINARY_CLOUD_NAME,
+      api_key = process.env.CLOUDINARY_API_KEY,
+      api_secret = process.env.CLOUDINARY_API_SECRET;
+    if (!cloud_name || !api_key || !api_secret)
+      throw new BadRequestException(
+        'Cloudinary chưa được cấu hình trên backend',
+      );
     cloudinary.config({ cloud_name, api_key, api_secret, secure: true });
     const uploaded = await this.uploadWebsiteImageBuffer(file.buffer);
-    return { data: { url: uploaded.secure_url, publicId: uploaded.public_id, width: uploaded.width, height: uploaded.height } };
+    return {
+      data: {
+        url: uploaded.secure_url,
+        publicId: uploaded.public_id,
+        width: uploaded.width,
+        height: uploaded.height,
+      },
+    };
   }
 
   private websiteProductSlug(value: string): string {
-    const slug = String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    if (!slug) throw new BadRequestException('Slug sản phẩm website không hợp lệ');
+    const slug = String(value || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+    if (!slug)
+      throw new BadRequestException('Slug sản phẩm website không hợp lệ');
     return slug;
   }
 
   private sanitizeWebsiteProductHtml(value?: string): string | undefined {
     if (value === undefined) return undefined;
-    return String(value).replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '').replace(/<\/?(script|style|iframe|object|embed)[^>]*>/gi, '').replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '').replace(/javascript\s*:/gi, '');
+    return String(value)
+      .replace(/<(script|style|iframe|object|embed)[^>]*>[\s\S]*?<\/\1>/gi, '')
+      .replace(/<\/?(script|style|iframe|object|embed)[^>]*>/gi, '')
+      .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+      .replace(/javascript\s*:/gi, '');
   }
 
-  private async ensureWebsiteProductCategory(categoryId?: string | null): Promise<void> {
+  private async ensureWebsiteProductCategory(
+    categoryId?: string | null,
+  ): Promise<void> {
     if (!categoryId) return;
-    if (!(await this.websiteCategories.exists({ _id: categoryId, isDeleted: false }))) throw new BadRequestException('Danh mục sản phẩm website không tồn tại');
+    if (
+      !(await this.websiteCategories.exists({
+        _id: categoryId,
+        isDeleted: false,
+      }))
+    )
+      throw new BadRequestException('Danh mục sản phẩm website không tồn tại');
   }
 
-  private websiteProductChanges(dto: CreateWebsiteProductDto | UpdateWebsiteProductDto): any {
+  private websiteProductChanges(
+    dto: CreateWebsiteProductDto | UpdateWebsiteProductDto,
+  ): any {
     const changes: any = { ...dto };
     if (dto.code !== undefined) changes.code = dto.code.trim();
     if (dto.name !== undefined) changes.name = dto.name.trim();
-    if (dto.slug !== undefined) changes.slug = this.websiteProductSlug(dto.slug);
+    if (dto.slug !== undefined)
+      changes.slug = this.websiteProductSlug(dto.slug);
     if (dto.unit !== undefined) changes.unit = dto.unit.trim();
-    if (dto.shortDescription !== undefined) changes.shortDescription = dto.shortDescription.trim();
-    if (dto.descriptionHtml !== undefined) changes.descriptionHtml = this.sanitizeWebsiteProductHtml(dto.descriptionHtml);
-    if (dto.imageUrls !== undefined) changes.imageUrls = dto.imageUrls.map((url) => url.trim()).filter(Boolean);
+    if (dto.shortDescription !== undefined)
+      changes.shortDescription = dto.shortDescription.trim();
+    if (dto.descriptionHtml !== undefined)
+      changes.descriptionHtml = this.sanitizeWebsiteProductHtml(
+        dto.descriptionHtml,
+      );
+    if (dto.imageUrls !== undefined)
+      changes.imageUrls = dto.imageUrls
+        .map((url) => url.trim())
+        .filter(Boolean);
     return changes;
   }
 
   private websiteProductWriteError(error: any): never {
-    if (error?.code === 11000) throw new ConflictException(`${error?.keyPattern?.code ? 'Mã sản phẩm' : 'Slug'} website đã tồn tại`);
+    if (error?.code === 11000)
+      throw new ConflictException(
+        `${error?.keyPattern?.code ? 'Mã sản phẩm' : 'Slug'} website đã tồn tại`,
+      );
     throw error;
   }
 
-  async createWebsiteProduct(dto: CreateWebsiteProductDto, actorId: string): Promise<any> {
+  async createWebsiteProduct(
+    dto: CreateWebsiteProductDto,
+    actorId: string,
+  ): Promise<any> {
     await this.ensureWebsiteProductCategory(dto.categoryId);
     try {
-      const data = await this.websiteProducts.create({ ...this.websiteProductChanges(dto), isActive: dto.isActive !== false, createdBy: actorId });
+      const data = await this.websiteProducts.create({
+        ...this.websiteProductChanges(dto),
+        isActive: dto.isActive !== false,
+        createdBy: actorId,
+      });
       return { data };
     } catch (error) {
       this.websiteProductWriteError(error);
     }
   }
 
-  async updateWebsiteProduct(id: string, dto: UpdateWebsiteProductDto, actorId: string): Promise<any> {
+  async updateWebsiteProduct(
+    id: string,
+    dto: UpdateWebsiteProductDto,
+    actorId: string,
+  ): Promise<any> {
     await this.ensureWebsiteProductCategory(dto.categoryId);
     try {
-      const data = await this.websiteProducts.findOneAndUpdate({ _id: id, isDeleted: false }, { $set: { ...this.websiteProductChanges(dto), updatedBy: actorId } }, { new: true });
+      const data = await this.websiteProducts.findOneAndUpdate(
+        { _id: id, isDeleted: false },
+        { $set: { ...this.websiteProductChanges(dto), updatedBy: actorId } },
+        { new: true },
+      );
       if (!data) throw new NotFoundException('Không tìm thấy sản phẩm website');
       return { data };
     } catch (error) {
@@ -249,16 +451,34 @@ export class WebsiteOrdersService {
   }
 
   async removeWebsiteProduct(id: string, actorId: string): Promise<any> {
-    const data = await this.websiteProducts.findOneAndUpdate({ _id: id, isDeleted: false }, { $set: { isDeleted: true, isActive: false, deletedAt: new Date(), deletedBy: actorId } }, { new: true });
+    const data = await this.websiteProducts.findOneAndUpdate(
+      { _id: id, isDeleted: false },
+      {
+        $set: {
+          isDeleted: true,
+          isActive: false,
+          deletedAt: new Date(),
+          deletedBy: actorId,
+        },
+      },
+      { new: true },
+    );
     if (!data) throw new NotFoundException('Không tìm thấy sản phẩm website');
     return { data: { id, deleted: true } };
   }
 
-  async mapInventoryProduct(id: string, inventoryProductId: string | null): Promise<any> {
+  async mapInventoryProduct(
+    id: string,
+    inventoryProductId: string | null,
+  ): Promise<any> {
     const inventoryProduct = inventoryProductId
-      ? await this.products.findOne({ _id: inventoryProductId, isDeleted: false }).select('_id code name unit').lean()
+      ? await this.products
+          .findOne({ _id: inventoryProductId, isDeleted: false })
+          .select('_id code name unit')
+          .lean()
       : null;
-    if (inventoryProductId && !inventoryProduct) throw new BadRequestException('Hàng hóa BO không tồn tại');
+    if (inventoryProductId && !inventoryProduct)
+      throw new BadRequestException('Hàng hóa BO không tồn tại');
     const doc = await this.websiteProducts.findOneAndUpdate(
       { _id: id, isDeleted: false },
       { $set: { inventoryProductId } },
@@ -270,13 +490,35 @@ export class WebsiteOrdersService {
 
   async verifyCustomer(code: string, phone: string): Promise<any> {
     const normalized = this.normalizePhone(phone);
-    const customer = await this.customers.findOne({
-      code: code.trim(),
-      isDeleted: false,
-      $or: [{ phone: normalized }, { phones: normalized }, { phone: phone.trim() }, { phones: phone.trim() }],
-    }).select('_id code name phone phones').lean();
-    if (!customer) throw new UnauthorizedException('Mã khách hàng hoặc số điện thoại không đúng');
-    return { data: { customerId: String((customer as any)._id), customerCode: customer.code, customerName: customer.name, phone: customer.phone || normalized, invoicePoints: 0, productPoints: 0 } };
+    const customer = await this.customers
+      .findOne({
+        code: code.trim(),
+        isDeleted: false,
+        $or: [
+          { phone: normalized },
+          { phones: normalized },
+          { phone: phone.trim() },
+          { phones: phone.trim() },
+        ],
+      })
+      .select('_id code name phone phones invoiceCoinBalance plusExCoinBalance')
+      .lean();
+    if (!customer)
+      throw new UnauthorizedException(
+        'Mã khách hàng hoặc số điện thoại không đúng',
+      );
+    return {
+      data: {
+        customerId: String((customer as any)._id),
+        customerCode: customer.code,
+        customerName: customer.name,
+        phone: customer.phone || normalized,
+        invoicePoints: Number((customer as any).invoiceCoinBalance || 0),
+        productPoints: Number((customer as any).plusExCoinBalance || 0),
+        invoiceCoin: Number((customer as any).invoiceCoinBalance || 0),
+        plusExCoin: Number((customer as any).plusExCoinBalance || 0),
+      },
+    };
   }
 
   async create(dto: CreateWebsiteOrderDto): Promise<any> {
@@ -291,20 +533,40 @@ export class WebsiteOrdersService {
           'productId phải là id MongoDB được trả về từ API /public/website/products',
         invalidProductIds: [...new Set(invalidIds)],
       });
-    if (new Set(ids).size !== ids.length) throw new BadRequestException('Sản phẩm trong đơn không được trùng dòng');
-    const products = await this.websiteProducts.find({ _id: { $in: ids }, isDeleted: false, isActive: true }).lean();
-    if (products.length !== ids.length) throw new BadRequestException('Có sản phẩm không tồn tại hoặc đã ngừng kinh doanh');
+    if (new Set(ids).size !== ids.length)
+      throw new BadRequestException('Sản phẩm trong đơn không được trùng dòng');
+    const products = await this.websiteProducts
+      .find({ _id: { $in: ids }, isDeleted: false, isActive: true })
+      .lean();
+    if (products.length !== ids.length)
+      throw new BadRequestException(
+        'Có sản phẩm không tồn tại hoặc đã ngừng kinh doanh',
+      );
     let customerId: string | undefined;
     if (dto.customerType === WebsiteCustomerType.EXISTING) {
-      if (!dto.customerCode) throw new BadRequestException('Khách cũ phải cung cấp mã khách hàng');
-      const verified = await this.verifyCustomer(dto.customerCode, dto.customerPhone);
+      if (!dto.customerCode)
+        throw new BadRequestException('Khách cũ phải cung cấp mã khách hàng');
+      const verified = await this.verifyCustomer(
+        dto.customerCode,
+        dto.customerPhone,
+      );
       customerId = verified.data.customerId;
     }
     const productMap = new Map(products.map((p: any) => [String(p._id), p]));
     const items = dto.items.map((item) => {
       const product: any = productMap.get(item.productId);
       const unitPrice = Number(product.sellPrice) || 0;
-      return { websiteProductId: item.productId, inventoryProductId: product.inventoryProductId, productCode: product.code, productName: product.name, imageUrl: (product.imageUrls || []).find(Boolean), unit: product.unit, quantity: item.quantity, unitPrice, lineTotal: unitPrice * item.quantity };
+      return {
+        websiteProductId: item.productId,
+        inventoryProductId: product.inventoryProductId,
+        productCode: product.code,
+        productName: product.name,
+        imageUrl: (product.imageUrls || []).find(Boolean),
+        unit: product.unit,
+        quantity: item.quantity,
+        unitPrice,
+        lineTotal: unitPrice * item.quantity,
+      };
     });
     const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
     const accessToken = randomBytes(24).toString('hex');
@@ -328,10 +590,24 @@ export class WebsiteOrdersService {
       paymentStatus: WebsitePaymentStatus.UNPAID,
       status,
       accessTokenHash: this.hash(accessToken),
-      statusHistory: [{ status, at: new Date(), note: 'Đơn hàng được tạo từ website' }],
+      statusHistory: [
+        { status, at: new Date(), note: 'Đơn hàng được tạo từ website' },
+      ],
     });
     const orderWithImages = (await this.withOrderImages([order.toObject()]))[0];
-    return { data: { order: this.publicOrder(orderWithImages), accessToken, simulatedPayment: dto.paymentMethod === WebsitePaymentMethod.VNPAY_SIMULATED ? { method: 'VNPAY_SIMULATED', confirmEndpoint: `/public/website-orders/${code}/payments/simulate-success` } : null } };
+    return {
+      data: {
+        order: this.publicOrder(orderWithImages),
+        accessToken,
+        simulatedPayment:
+          dto.paymentMethod === WebsitePaymentMethod.VNPAY_SIMULATED
+            ? {
+                method: 'VNPAY_SIMULATED',
+                confirmEndpoint: `/public/website-orders/${code}/payments/simulate-success`,
+              }
+            : null,
+      },
+    };
   }
 
   private publicOrder(order: any): any {
@@ -341,35 +617,73 @@ export class WebsiteOrdersService {
 
   private async ownedOrder(code: string, token: string): Promise<any> {
     if (!token) throw new UnauthorizedException('Thiếu mã truy cập đơn hàng');
-    const order = await this.orders.findOne({ code, isDeleted: false }).select('+accessTokenHash');
+    const order = await this.orders
+      .findOne({ code, isDeleted: false })
+      .select('+accessTokenHash');
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    if (order.accessTokenHash !== this.hash(token)) throw new UnauthorizedException('Mã truy cập đơn hàng không đúng');
+    if (order.accessTokenHash !== this.hash(token))
+      throw new UnauthorizedException('Mã truy cập đơn hàng không đúng');
     return order;
   }
 
   async publicDetail(code: string, token: string): Promise<any> {
     const order = await this.ownedOrder(code, token);
-    return { data: this.publicOrder((await this.withOrderImages([order.toObject()]))[0]) };
+    return {
+      data: this.publicOrder(
+        (await this.withOrderImages([order.toObject()]))[0],
+      ),
+    };
   }
 
   async simulatePayment(code: string, token: string): Promise<any> {
     const order = await this.ownedOrder(code, token);
-    if (order.paymentMethod !== WebsitePaymentMethod.VNPAY_SIMULATED) throw new BadRequestException('Đơn hàng không chọn thanh toán VNPay giả lập');
-    if (order.status === WebsiteOrderStatus.CANCELLED) throw new BadRequestException('Đơn hàng đã bị hủy');
+    if (order.paymentMethod !== WebsitePaymentMethod.VNPAY_SIMULATED)
+      throw new BadRequestException(
+        'Đơn hàng không chọn thanh toán VNPay giả lập',
+      );
+    if (order.status === WebsiteOrderStatus.CANCELLED)
+      throw new BadRequestException('Đơn hàng đã bị hủy');
     order.paymentStatus = WebsitePaymentStatus.PAID_SIMULATED;
     await order.save();
-    return { data: this.publicOrder((await this.withOrderImages([order.toObject()]))[0]) };
+    return {
+      data: this.publicOrder(
+        (await this.withOrderImages([order.toObject()]))[0],
+      ),
+    };
   }
 
   async adminList(q: WebsiteOrderAdminQueryDto): Promise<any> {
-    const page = Math.max(1, Number(q.page) || 1), limit = Math.min(100, Math.max(1, Number(q.limit) || 20));
+    const page = Math.max(1, Number(q.page) || 1),
+      limit = Math.min(100, Math.max(1, Number(q.limit) || 20));
     const filter: any = { isDeleted: false };
     if (q.status) filter.status = q.status;
     if (q.assignedSaleId) filter.assignedSaleId = q.assignedSaleId;
-    if (q.from || q.to) { filter.createdAt = {}; if (q.from) filter.createdAt.$gte = new Date(q.from); if (q.to) filter.createdAt.$lte = new Date(q.to); }
-    if (q.search?.trim()) { const escaped = q.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); filter.$or = [{ code: new RegExp(escaped, 'i') }, { customerName: new RegExp(escaped, 'i') }, { customerPhone: new RegExp(escaped, 'i') }]; }
-    const [data, total] = await Promise.all([this.orders.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(), this.orders.countDocuments(filter)]);
-    return { data: await this.withOrderImages(data), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    if (q.from || q.to) {
+      filter.createdAt = {};
+      if (q.from) filter.createdAt.$gte = new Date(q.from);
+      if (q.to) filter.createdAt.$lte = new Date(q.to);
+    }
+    if (q.search?.trim()) {
+      const escaped = q.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { code: new RegExp(escaped, 'i') },
+        { customerName: new RegExp(escaped, 'i') },
+        { customerPhone: new RegExp(escaped, 'i') },
+      ];
+    }
+    const [data, total] = await Promise.all([
+      this.orders
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      this.orders.countDocuments(filter),
+    ]);
+    return {
+      data: await this.withOrderImages(data),
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async adminDetail(id: string): Promise<any> {
@@ -378,66 +692,158 @@ export class WebsiteOrdersService {
     return { data: (await this.withOrderImages([doc]))[0] };
   }
 
-  async assign(id: string, dto: AssignWebsiteOrderDto, actorId: string): Promise<any> {
-    const sale = await this.users.findOne({ _id: dto.saleId, isDeleted: false }).select('_id').lean();
-    if (!sale) throw new BadRequestException('Sale được phân công không tồn tại');
+  async assign(
+    id: string,
+    dto: AssignWebsiteOrderDto,
+    actorId: string,
+  ): Promise<any> {
+    const sale = await this.users
+      .findOne({ _id: dto.saleId, isDeleted: false })
+      .select('_id')
+      .lean();
+    if (!sale)
+      throw new BadRequestException('Sale được phân công không tồn tại');
     const now = new Date();
     const doc = await this.orders.findOneAndUpdate(
-      { _id: id, isDeleted: false, status: { $nin: [WebsiteOrderStatus.COMPLETED, WebsiteOrderStatus.CANCELLED] } },
-      { $set: { assignedSaleId: dto.saleId, assignedAt: now, assignedBy: actorId, status: WebsiteOrderStatus.ASSIGNED }, $push: { statusHistory: { status: WebsiteOrderStatus.ASSIGNED, at: now, by: actorId, note: dto.note } } },
+      {
+        _id: id,
+        isDeleted: false,
+        status: {
+          $nin: [WebsiteOrderStatus.COMPLETED, WebsiteOrderStatus.CANCELLED],
+        },
+      },
+      {
+        $set: {
+          assignedSaleId: dto.saleId,
+          assignedAt: now,
+          assignedBy: actorId,
+          status: WebsiteOrderStatus.ASSIGNED,
+        },
+        $push: {
+          statusHistory: {
+            status: WebsiteOrderStatus.ASSIGNED,
+            at: now,
+            by: actorId,
+            note: dto.note,
+          },
+        },
+      },
       { new: true },
     );
-    if (!doc) throw new BadRequestException('Không thể phân công đơn ở trạng thái hiện tại');
+    if (!doc)
+      throw new BadRequestException(
+        'Không thể phân công đơn ở trạng thái hiện tại',
+      );
     return { data: (await this.withOrderImages([doc.toObject()]))[0] };
   }
 
-  async changeStatus(id: string, dto: ChangeWebsiteOrderStatusDto, actorId: string): Promise<any> {
+  async changeStatus(
+    id: string,
+    dto: ChangeWebsiteOrderStatusDto,
+    actorId: string,
+  ): Promise<any> {
     const allowed: Record<WebsiteOrderStatus, WebsiteOrderStatus[]> = {
       PENDING: [WebsiteOrderStatus.CONFIRMED, WebsiteOrderStatus.CANCELLED],
-      CONFIRMED: [WebsiteOrderStatus.ASSIGNED, WebsiteOrderStatus.PROCESSING, WebsiteOrderStatus.CANCELLED],
+      CONFIRMED: [
+        WebsiteOrderStatus.ASSIGNED,
+        WebsiteOrderStatus.PROCESSING,
+        WebsiteOrderStatus.CANCELLED,
+      ],
       ASSIGNED: [WebsiteOrderStatus.PROCESSING, WebsiteOrderStatus.CANCELLED],
       PROCESSING: [WebsiteOrderStatus.SHIPPING, WebsiteOrderStatus.CANCELLED],
       SHIPPING: [WebsiteOrderStatus.COMPLETED, WebsiteOrderStatus.CANCELLED],
-      COMPLETED: [], CANCELLED: [],
+      COMPLETED: [],
+      CANCELLED: [],
     };
     const order = await this.orders.findOne({ _id: id, isDeleted: false });
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng website');
-    if (!allowed[order.status]?.includes(dto.status)) throw new BadRequestException(`Không thể chuyển trạng thái từ ${order.status} sang ${dto.status}`);
+    if (!allowed[order.status]?.includes(dto.status))
+      throw new BadRequestException(
+        `Không thể chuyển trạng thái từ ${order.status} sang ${dto.status}`,
+      );
     order.status = dto.status;
-    order.statusHistory.push({ status: dto.status, at: new Date(), by: actorId, note: dto.note });
+    order.statusHistory.push({
+      status: dto.status,
+      at: new Date(),
+      by: actorId,
+      note: dto.note,
+    });
     await order.save();
     return { data: (await this.withOrderImages([order.toObject()]))[0] };
   }
 
-  async convertToInvoice(id: string, dto: ConvertWebsiteOrderDto, actorId: string): Promise<any> {
+  async convertToInvoice(
+    id: string,
+    dto: ConvertWebsiteOrderDto,
+    actorId: string,
+  ): Promise<any> {
     if (dto.sourceType === 'truck' && !dto.truckId)
       throw new BadRequestException('Phải chọn xe khi xuất hàng từ xe');
-    const initial: any = await this.orders.findOne({ _id: id, isDeleted: false }).lean();
-    if (!initial) throw new NotFoundException('Không tìm thấy đơn hàng website');
+    const initial: any = await this.orders
+      .findOne({ _id: id, isDeleted: false })
+      .lean();
+    if (!initial)
+      throw new NotFoundException('Không tìm thấy đơn hàng website');
     if (initial.status === WebsiteOrderStatus.CANCELLED)
       throw new BadRequestException('Không thể tạo hóa đơn từ đơn đã hủy');
     if (initial.invoiceId)
-      return { data: { orderId: String(initial._id), orderCode: initial.code, invoiceId: initial.invoiceId, invoiceCode: initial.invoiceCode, alreadyConverted: true } };
+      return {
+        data: {
+          orderId: String(initial._id),
+          orderCode: initial.code,
+          invoiceId: initial.invoiceId,
+          invoiceCode: initial.invoiceCode,
+          alreadyConverted: true,
+        },
+      };
 
     const salespersonId = dto.salespersonId || initial.assignedSaleId;
-    if (!salespersonId) throw new BadRequestException('Phải phân công sale trước khi tạo hóa đơn');
+    if (!salespersonId)
+      throw new BadRequestException(
+        'Phải phân công sale trước khi tạo hóa đơn',
+      );
     const keyHash = this.hash(dto.idempotencyKey.trim());
     const invoiceCode = `HD-${initial.code}`;
 
-    const existingInvoice: any = await this.invoices.findOne({ code: invoiceCode, isDeleted: false }).select('_id code').lean();
+    const existingInvoice: any = await this.invoices
+      .findOne({ code: invoiceCode, isDeleted: false })
+      .select('_id code')
+      .lean();
     if (existingInvoice) {
       const reconciled: any = await this.orders.findOneAndUpdate(
         { _id: id, isDeleted: false, invoiceId: { $exists: false } },
-        { $set: { invoiceId: String(existingInvoice._id), invoiceCode: existingInvoice.code, conversionStatus: WebsiteOrderConversionStatus.COMPLETED, convertedAt: new Date(), convertedBy: actorId }, $unset: { conversionError: 1 } },
+        {
+          $set: {
+            invoiceId: String(existingInvoice._id),
+            invoiceCode: existingInvoice.code,
+            conversionStatus: WebsiteOrderConversionStatus.COMPLETED,
+            convertedAt: new Date(),
+            convertedBy: actorId,
+          },
+          $unset: { conversionError: 1 },
+        },
         { new: true },
       );
-      return { data: { orderId: id, orderCode: initial.code, invoiceId: String(existingInvoice._id), invoiceCode: existingInvoice.code, alreadyConverted: true, reconciled: Boolean(reconciled) } };
+      return {
+        data: {
+          orderId: id,
+          orderCode: initial.code,
+          invoiceId: String(existingInvoice._id),
+          invoiceCode: existingInvoice.code,
+          alreadyConverted: true,
+          reconciled: Boolean(reconciled),
+        },
+      };
     }
 
     if (
       initial.conversionStatus === WebsiteOrderConversionStatus.PROCESSING &&
       initial.conversionIdempotencyKeyHash !== keyHash
-    ) throw new BadRequestException({ code: 'WEBSITE_ORDER_CONVERSION_IN_PROGRESS', message: 'Đơn hàng đang được chuyển thành hóa đơn' });
+    )
+      throw new BadRequestException({
+        code: 'WEBSITE_ORDER_CONVERSION_IN_PROGRESS',
+        message: 'Đơn hàng đang được chuyển thành hóa đơn',
+      });
 
     const reserved = await this.orders.findOneAndUpdate(
       {
@@ -447,32 +853,71 @@ export class WebsiteOrdersService {
         $or: [
           { conversionStatus: { $exists: false } },
           { conversionStatus: WebsiteOrderConversionStatus.FAILED },
-          { conversionStatus: WebsiteOrderConversionStatus.PROCESSING, conversionIdempotencyKeyHash: keyHash },
+          {
+            conversionStatus: WebsiteOrderConversionStatus.PROCESSING,
+            conversionIdempotencyKeyHash: keyHash,
+          },
         ],
       },
-      { $set: { conversionStatus: WebsiteOrderConversionStatus.PROCESSING, conversionIdempotencyKeyHash: keyHash, conversionStartedAt: new Date(), convertedBy: actorId }, $unset: { conversionError: 1 } },
+      {
+        $set: {
+          conversionStatus: WebsiteOrderConversionStatus.PROCESSING,
+          conversionIdempotencyKeyHash: keyHash,
+          conversionStartedAt: new Date(),
+          convertedBy: actorId,
+        },
+        $unset: { conversionError: 1 },
+      },
       { new: true },
     );
-    if (!reserved) throw new BadRequestException('Đơn hàng đã được xử lý hoặc đang được xử lý bởi yêu cầu khác');
+    if (!reserved)
+      throw new BadRequestException(
+        'Đơn hàng đã được xử lý hoặc đang được xử lý bởi yêu cầu khác',
+      );
 
     try {
-      const payments = dto.payments || (
-        initial.paymentStatus === WebsitePaymentStatus.PAID_SIMULATED
-          ? [{ method: PaymentMethod.BANK_TRANSFER, amount: initial.totalAmount, referenceCode: `VNPAY-SIM-${initial.code}`, note: 'Thanh toán VNPay giả lập từ website' }]
-          : []
-      );
+      const payments =
+        dto.payments ||
+        (initial.paymentStatus === WebsitePaymentStatus.PAID_SIMULATED
+          ? [
+              {
+                method: PaymentMethod.BANK_TRANSFER,
+                amount: initial.totalAmount,
+                referenceCode: `VNPAY-SIM-${initial.code}`,
+                note: 'Thanh toán VNPay giả lập từ website',
+              },
+            ]
+          : []);
       const invoice = await this.invoicesService.create(
         {
           code: invoiceCode,
-          customerId: initial.customerType === WebsiteCustomerType.EXISTING ? initial.customerId : undefined,
-          newCustomer: initial.customerType === WebsiteCustomerType.NEW ? { name: initial.customerName, phone: initial.customerPhone, address: initial.deliveryAddress, note: `Tạo từ đơn website ${initial.code}` } : undefined,
+          customerId:
+            initial.customerType === WebsiteCustomerType.EXISTING
+              ? initial.customerId
+              : undefined,
+          newCustomer:
+            initial.customerType === WebsiteCustomerType.NEW
+              ? {
+                  name: initial.customerName,
+                  phone: initial.customerPhone,
+                  address: initial.deliveryAddress,
+                  note: `Tạo từ đơn website ${initial.code}`,
+                }
+              : undefined,
           sourceType: dto.sourceType,
           truckId: dto.truckId,
           salespersonId,
           items: initial.items.map((item: any) => {
             if (!item.inventoryProductId)
-              throw new BadRequestException({ code: 'WEBSITE_PRODUCT_NOT_MAPPED', message: `Sản phẩm website ${item.productCode} chưa được map với hàng hóa BO` });
-            return { productId: item.inventoryProductId, qty: item.quantity, unitPriceOverride: item.unitPrice };
+              throw new BadRequestException({
+                code: 'WEBSITE_PRODUCT_NOT_MAPPED',
+                message: `Sản phẩm website ${item.productCode} chưa được map với hàng hóa BO`,
+              });
+            return {
+              productId: item.inventoryProductId,
+              qty: item.quantity,
+              unitPriceOverride: item.unitPrice,
+            };
           }),
           payments,
           voucherCode: dto.voucherCode,
@@ -509,24 +954,72 @@ export class WebsiteOrdersService {
           },
         };
       const updated = await this.orders.findOneAndUpdate(
-        { _id: id, isDeleted: false, invoiceId: { $exists: false }, conversionIdempotencyKeyHash: keyHash },
+        {
+          _id: id,
+          isDeleted: false,
+          invoiceId: { $exists: false },
+          conversionIdempotencyKeyHash: keyHash,
+        },
         orderUpdate,
         { new: true },
       );
-      if (!updated) throw new BadRequestException('Hóa đơn đã tạo nhưng không thể liên kết đơn hàng; hãy tải lại để hệ thống đối chiếu');
-      return { data: { orderId: id, orderCode: initial.code, invoiceId: invoice.data.id, invoiceCode: invoice.data.code, invoice: invoice.data, alreadyConverted: false } };
+      if (!updated)
+        throw new BadRequestException(
+          'Hóa đơn đã tạo nhưng không thể liên kết đơn hàng; hãy tải lại để hệ thống đối chiếu',
+        );
+      return {
+        data: {
+          orderId: id,
+          orderCode: initial.code,
+          invoiceId: invoice.data.id,
+          invoiceCode: invoice.data.code,
+          invoice: invoice.data,
+          alreadyConverted: false,
+        },
+      };
     } catch (error) {
-      const recovered: any = await this.invoices.findOne({ code: invoiceCode, isDeleted: false }).select('_id code').lean();
+      const recovered: any = await this.invoices
+        .findOne({ code: invoiceCode, isDeleted: false })
+        .select('_id code')
+        .lean();
       if (recovered) {
         await this.orders.updateOne(
           { _id: id, isDeleted: false },
-          { $set: { invoiceId: String(recovered._id), invoiceCode: recovered.code, conversionStatus: WebsiteOrderConversionStatus.COMPLETED, convertedAt: new Date(), convertedBy: actorId }, $unset: { conversionError: 1 } },
+          {
+            $set: {
+              invoiceId: String(recovered._id),
+              invoiceCode: recovered.code,
+              conversionStatus: WebsiteOrderConversionStatus.COMPLETED,
+              convertedAt: new Date(),
+              convertedBy: actorId,
+            },
+            $unset: { conversionError: 1 },
+          },
         );
-        return { data: { orderId: id, orderCode: initial.code, invoiceId: String(recovered._id), invoiceCode: recovered.code, alreadyConverted: true, reconciled: true } };
+        return {
+          data: {
+            orderId: id,
+            orderCode: initial.code,
+            invoiceId: String(recovered._id),
+            invoiceCode: recovered.code,
+            alreadyConverted: true,
+            reconciled: true,
+          },
+        };
       }
       await this.orders.updateOne(
-        { _id: id, conversionIdempotencyKeyHash: keyHash, invoiceId: { $exists: false } },
-        { $set: { conversionStatus: WebsiteOrderConversionStatus.FAILED, conversionError: error instanceof Error ? error.message : 'Không thể tạo hóa đơn' } },
+        {
+          _id: id,
+          conversionIdempotencyKeyHash: keyHash,
+          invoiceId: { $exists: false },
+        },
+        {
+          $set: {
+            conversionStatus: WebsiteOrderConversionStatus.FAILED,
+            conversionError:
+              error instanceof Error ? error.message : 'Không thể tạo hóa đơn',
+          },
+        },
       );
       throw error;
     }

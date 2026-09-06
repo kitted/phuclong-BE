@@ -4,9 +4,15 @@ import { UsersController } from './controllers/users.controller';
 import { WebsiteOrdersModule } from 'src/collection/website-orders/website-orders.module';
 import { WebsiteController } from './controllers/website.controller';
 import { WebsiteContentsModule } from 'src/collection/website-contents/website-contents.module';
+import { CustomerCoinsModule } from 'src/collection/customer-coins/customer-coins.module';
 
 @Module({
-  imports: [UsersModule, WebsiteOrdersModule, WebsiteContentsModule],
+  imports: [
+    UsersModule,
+    WebsiteOrdersModule,
+    WebsiteContentsModule,
+    CustomerCoinsModule,
+  ],
   controllers: [UsersController, WebsiteController],
 })
 export class PublicModule {}

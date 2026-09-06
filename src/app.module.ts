@@ -31,6 +31,7 @@ import { CustomerReturnsModule } from './collection/customer-returns/customer-re
 import { GoodsAdvancesModule } from './collection/goods-advances/goods-advances.module';
 import { DailyReportsModule } from './collection/daily-reports/daily-reports.module';
 import { QuickNotesModule } from './collection/quick-notes/quick-notes.module';
+import { CustomerCoinsModule } from './collection/customer-coins/customer-coins.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { QuickNotesModule } from './collection/quick-notes/quick-notes.module';
     GoodsAdvancesModule,
     DailyReportsModule,
     QuickNotesModule,
+    CustomerCoinsModule,
     PublicModule,
     AdminModule,
     RouterModule.register([

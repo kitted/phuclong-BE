@@ -45,7 +45,9 @@ export class Products extends BaseModel {
   @prop({ default: 0 })
   stock: number;
 
+  @prop({ default: false, index: true })
+  plusExCoinEnabled: boolean;
+
   @prop({ ref: () => Suppliers, required: false, default: null })
   supplierId?: Ref<Suppliers>;
-
 }

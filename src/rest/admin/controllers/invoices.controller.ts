@@ -1,18 +1,42 @@
-import { Body, Get, Param, Post, Query, Req, Res, StreamableFile } from '@nestjs/common';
+import {
+  Body,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  Res,
+  StreamableFile,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { ApiOperation } from '@nestjs/swagger';
 import { ParseIdPipe } from '../../../core/pipes/parseId.pipe';
 import { ID } from '../../../core/interfaces/id.interface';
 import { WarehouseController } from '../decorators/warehouse';
 import { InvoicesService } from 'src/collection/invoices/invoices.service';
-import { ApplyGiftPromotionDto, CreateInvoiceDto, GiftPromotionPreviewDto, InvoicePreviewDto, InvoiceQueryDto, ReverseInvoiceDto } from 'src/collection/invoices/dtos/invoices.dto';
+import {
+  ApplyGiftPromotionDto,
+  CreateInvoiceDto,
+  GiftPromotionPreviewDto,
+  InvoicePreviewDto,
+  InvoiceQueryDto,
+  ReverseInvoiceDto,
+} from 'src/collection/invoices/dtos/invoices.dto';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
 import { AdminOnly } from '../decorators/admin-only';
 
 @WarehouseController(['invoices'])
 export class InvoicesController {
   constructor(private readonly service: InvoicesService) {}
-  private actor(request: AuthRequest): any { const user: any = request.user; const doc = user?._doc || user; return { id: String(doc?.id || doc?._id || ''), role: doc?.role }; }
+  private actor(request: AuthRequest): any {
+    const user: any = request.user;
+    const doc = user?._doc || user;
+    return {
+      id: String(doc?.id || doc?._id || ''),
+      role: doc?.role,
+      name: doc?.fullName || doc?.name || doc?.username,
+    };
+  }
 
   @ApiOperation({ summary: 'Create invoice' })
   @Post()
@@ -20,19 +44,25 @@ export class InvoicesController {
     return await this.service.create(dto, this.actor(request));
   }
 
-  @ApiOperation({ summary: 'Preview server-calculated invoice totals and voucher' })
+  @ApiOperation({
+    summary: 'Preview server-calculated invoice totals and voucher',
+  })
   @Post('preview')
   preview(@Body() dto: InvoicePreviewDto) {
     return this.service.preview(dto);
   }
 
-  @ApiOperation({ summary: 'Find eligible and nearly eligible gift promotions' })
+  @ApiOperation({
+    summary: 'Find eligible and nearly eligible gift promotions',
+  })
   @Post('promotions/preview')
   giftPromotionsPreview(@Body() dto: GiftPromotionPreviewDto) {
     return this.service.giftPromotionsPreview(dto);
   }
 
-  @ApiOperation({ summary: 'Validate gift selection and preview promotion application' })
+  @ApiOperation({
+    summary: 'Validate gift selection and preview promotion application',
+  })
   @Post('promotions/apply')
   applyGiftPromotion(@Body() dto: ApplyGiftPromotionDto) {
     return this.service.applyGiftPromotion(dto);
@@ -40,34 +70,69 @@ export class InvoicesController {
 
   @ApiOperation({ summary: 'Get all invoices' })
   @Get()
-  async findAll(@Query() query: InvoiceQueryDto, @Req() request: AuthRequest): Promise<any> {
+  async findAll(
+    @Query() query: InvoiceQueryDto,
+    @Req() request: AuthRequest,
+  ): Promise<any> {
     return await this.service.findAll(query, this.actor(request));
   }
 
-  @Get('timeline') @ApiOperation({ summary: 'Get invoice timeline with the same database-enforced visibility scope' })
-  timeline(@Query() query: InvoiceQueryDto, @Req() request: AuthRequest): Promise<any> {
+  @Get('timeline')
+  @ApiOperation({
+    summary:
+      'Get invoice timeline with the same database-enforced visibility scope',
+  })
+  timeline(
+    @Query() query: InvoiceQueryDto,
+    @Req() request: AuthRequest,
+  ): Promise<any> {
     return this.service.timeline(query, this.actor(request));
   }
 
   @ApiOperation({ summary: 'Get filtered invoice revenue summary' })
   @Get('summary')
-  summary(@Query() query: InvoiceQueryDto, @Req() request: AuthRequest): Promise<any> { return this.service.summary(query, this.actor(request)); }
+  summary(
+    @Query() query: InvoiceQueryDto,
+    @Req() request: AuthRequest,
+  ): Promise<any> {
+    return this.service.summary(query, this.actor(request));
+  }
 
-  @Get('export') @ApiOperation({ summary: 'Export all visible invoice timeline documents to XLSX' })
-  async export(@Query() query: InvoiceQueryDto, @Req() request: AuthRequest, @Res({ passthrough: true }) response: Response): Promise<StreamableFile> {
+  @Get('export')
+  @ApiOperation({
+    summary: 'Export all visible invoice timeline documents to XLSX',
+  })
+  async export(
+    @Query() query: InvoiceQueryDto,
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
     const file = await this.service.export(query, this.actor(request));
-    response.set({ 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="invoices-${query.from || 'all'}-${query.to || 'all'}.xlsx"` });
+    response.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="invoices-${query.from || 'all'}-${query.to || 'all'}.xlsx"`,
+    });
     return new StreamableFile(file);
   }
 
-  @Post(':id/reverse') @AdminOnly() @ApiOperation({ summary: 'Reverse an invoice transactionally' })
-  reverse(@Param('id', ParseIdPipe) id: ID, @Body() dto: ReverseInvoiceDto, @Req() request: AuthRequest) {
+  @Post(':id/reverse')
+  @AdminOnly()
+  @ApiOperation({ summary: 'Reverse an invoice transactionally' })
+  reverse(
+    @Param('id', ParseIdPipe) id: ID,
+    @Body() dto: ReverseInvoiceDto,
+    @Req() request: AuthRequest,
+  ) {
     return this.service.reverse(String(id), dto.reason, this.actor(request));
   }
 
   @ApiOperation({ summary: 'Get invoice by ID' })
   @Get(':id')
-  async findOne(@Param('id', ParseIdPipe) id: ID, @Req() request: AuthRequest): Promise<any> {
+  async findOne(
+    @Param('id', ParseIdPipe) id: ID,
+    @Req() request: AuthRequest,
+  ): Promise<any> {
     return await this.service.findOne(id, this.actor(request));
   }
 }

@@ -28,6 +28,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import * as ExcelJS from 'exceljs';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 import { LeadsService } from '../leads/leads.service';
+import { CustomerCoinsService } from '../customer-coins/customer-coins.service';
 
 describe('invoice salesperson authorization', () => {
   const staffId = '507f1f77bcf86cd799439011';
@@ -194,6 +195,7 @@ describe('InvoicesService dependency injection', () => {
         { provide: PromotionActivationsService, useValue: {} },
         { provide: NotificationsService, useValue: {} },
         { provide: LeadsService, useValue: {} },
+        { provide: CustomerCoinsService, useValue: {} },
         {
           provide: getConnectionToken(),
           useValue: { startSession: jest.fn() },

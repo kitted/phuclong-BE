@@ -73,8 +73,9 @@ import { NotificationType } from '../notifications/schemas/notifications.schema'
 import * as ExcelJS from 'exceljs';
 import { LeadsService } from '../leads/leads.service';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
+import { CustomerCoinsService } from '../customer-coins/customer-coins.service';
 
-type Actor = { id?: string; role?: RoleEnum };
+type Actor = { id?: string; role?: RoleEnum; name?: string };
 
 export function resolveInvoiceSalespersonId(
   requestedId: string | undefined,
@@ -172,6 +173,7 @@ export class InvoicesService {
     private readonly activations: PromotionActivationsService,
     private readonly notifications: NotificationsService,
     private readonly leadsService: LeadsService,
+    private readonly customerCoins: CustomerCoinsService,
     @Inject(getConnectionToken()) private readonly connection: Connection,
   ) {}
 
@@ -1457,6 +1459,20 @@ export class InvoicesService {
             );
           }
         }
+        const earnedCoins = await this.customerCoins.awardInvoice(
+          invoice,
+          session,
+        );
+        await this.model.updateOne(
+          { _id: invoice._id },
+          {
+            $set: {
+              invoiceCoinEarned: earnedCoins.invoiceCoin,
+              plusExCoinEarned: earnedCoins.plusExCoin,
+            },
+          },
+          { session },
+        );
         await this.movements.recordMany(
           movementInputs.map((movement) => ({
             ...movement,
@@ -1492,6 +1508,8 @@ export class InvoicesService {
             customerDebtAfter,
             debtPaymentCode,
             paymentStatus,
+            invoiceCoinEarned: earnedCoins.invoiceCoin,
+            plusExCoinEarned: earnedCoins.plusExCoin,
             promotionActivations: activation
               ? [
                   {
@@ -1776,6 +1794,11 @@ export class InvoicesService {
             referenceCode: reversalCode,
             createdBy: actor.id,
           })),
+          session,
+        );
+        await this.customerCoins.reverseInvoice(
+          { ...invoice.toObject(), reversalReason: reason },
+          { id: actor.id, name: actor.name },
           session,
         );
         response = {
