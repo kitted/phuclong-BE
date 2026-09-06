@@ -1,16 +1,40 @@
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsMongoId, IsNotEmpty, IsOptional, IsString, Min, ValidateIf, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsDateString,
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsMongoId,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateIf,
+  ValidateNested,
+} from 'class-validator';
 import { TruckTransferType } from '../schemas/truck-transfers.schema';
 
-export enum TruckStatus { ACTIVE = 'active', INACTIVE = 'inactive' }
+export enum TruckStatus {
+  ACTIVE = 'active',
+  INACTIVE = 'inactive',
+}
 
 export class CreateTruckDto {
   @ApiPropertyOptional() @IsOptional() @IsString() code?: string;
   @ApiProperty() @IsString() @IsNotEmpty() name: string;
   @ApiProperty() @IsString() @IsNotEmpty() licensePlate: string;
-  @ApiPropertyOptional({ type: String, nullable: true }) @IsOptional() @ValidateIf((_, value) => value !== null) @IsMongoId() driverId?: string | null;
-  @ApiPropertyOptional({ enum: TruckStatus }) @IsOptional() @IsEnum(TruckStatus) status?: TruckStatus;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsMongoId()
+  driverId?: string | null;
+  @ApiPropertyOptional({ enum: TruckStatus })
+  @IsOptional()
+  @IsEnum(TruckStatus)
+  status?: TruckStatus;
 }
 export class UpdateTruckDto extends PartialType(CreateTruckDto) {}
 
@@ -27,33 +51,61 @@ export class LoadGoodsDto {
   @ApiPropertyOptional() @IsOptional() @IsString() code?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() date?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
-  @ApiProperty({ type: [TruckItemDto] }) @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => TruckItemDto) items: TruckItemDto[];
+  @ApiProperty({ type: [TruckItemDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => TruckItemDto)
+  items: TruckItemDto[];
 }
 export class ReturnGoodsDto extends LoadGoodsDto {}
 export class TruckToTruckTransferDto {
   @ApiProperty() @IsMongoId() destinationTruckId: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() date?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
-  @ApiProperty({ type: [TruckItemDto] }) @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => TruckItemDto) items: TruckItemDto[];
+  @ApiProperty({ type: [TruckItemDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => TruckItemDto)
+  items: TruckItemDto[];
 }
-export class ReverseTruckTransferDto { @ApiPropertyOptional() @IsOptional() @IsDateString() date?: string; @ApiPropertyOptional() @IsOptional() @IsString() note?: string; }
+export class ReverseTruckTransferDto {
+  @ApiPropertyOptional() @IsOptional() @IsDateString() date?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() note?: string;
+}
 
 export class TruckListQueryDto {
   @ApiPropertyOptional() @IsOptional() search?: string;
-  @ApiPropertyOptional({ enum: TruckStatus }) @IsOptional() @IsEnum(TruckStatus) status?: TruckStatus;
+  @ApiPropertyOptional({ enum: TruckStatus })
+  @IsOptional()
+  @IsEnum(TruckStatus)
+  status?: TruckStatus;
   @ApiPropertyOptional() @IsOptional() hasInventory?: string;
   @ApiPropertyOptional() @IsOptional() @IsMongoId() driverId?: string;
   @ApiPropertyOptional() @IsOptional() hasDriver?: string;
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
-  @ApiPropertyOptional({ enum: ['createdAt', 'code', 'name'] }) @IsOptional() sortBy?: 'createdAt' | 'code' | 'name';
-  @ApiPropertyOptional({ enum: ['asc', 'desc'] }) @IsOptional() sortOrder?: 'asc' | 'desc';
+  @ApiPropertyOptional({ enum: ['createdAt', 'code', 'name'] })
+  @IsOptional()
+  sortBy?: 'createdAt' | 'code' | 'name';
+  @ApiPropertyOptional({ enum: ['asc', 'desc'] }) @IsOptional() sortOrder?:
+    | 'asc'
+    | 'desc';
 }
 
 export class AvailableProductsQueryDto {
   @ApiPropertyOptional() @IsOptional() search?: string;
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
+  @ApiPropertyOptional({
+    enum: ['true', 'false'],
+    description:
+      'Include zero/negative truck balances for invoice sale selection',
+  })
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  allowNegative?: string;
 }
 
 export class AvailableDriversQueryDto {
@@ -66,11 +118,17 @@ export class TruckTransferQueryDto {
   @ApiPropertyOptional() @IsOptional() @IsMongoId() truckId?: string;
   @ApiPropertyOptional() @IsOptional() @IsMongoId() sourceTruckId?: string;
   @ApiPropertyOptional() @IsOptional() @IsMongoId() destinationTruckId?: string;
-  @ApiPropertyOptional({ enum: TruckTransferType }) @IsOptional() @IsEnum(TruckTransferType) type?: TruckTransferType;
+  @ApiPropertyOptional({ enum: TruckTransferType })
+  @IsOptional()
+  @IsEnum(TruckTransferType)
+  type?: TruckTransferType;
   @ApiPropertyOptional() @IsOptional() search?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() from?: string;
   @ApiPropertyOptional() @IsOptional() @IsDateString() to?: string;
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
 }
-export class TruckGoodsReportQueryDto { @ApiPropertyOptional() @IsOptional() @IsDateString() from?: string; @ApiPropertyOptional() @IsOptional() @IsDateString() to?: string; }
+export class TruckGoodsReportQueryDto {
+  @ApiPropertyOptional() @IsOptional() @IsDateString() from?: string;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() to?: string;
+}

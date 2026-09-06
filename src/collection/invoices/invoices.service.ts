@@ -177,6 +177,102 @@ export class InvoicesService {
     @Inject(getConnectionToken()) private readonly connection: Connection,
   ) {}
 
+  /**
+   * Hàng bán từ xe được phép tạo số dư âm. Dòng âm được giữ lại để một phiếu
+   * ứng hàng sau đó cộng trực tiếp vào đúng số dư, thay vì làm mất phần hàng
+   * mà sale đã bán trước khi kịp nhận hàng trên hệ thống.
+   */
+  private async deductTruckStockAllowNegative(
+    truckId: string,
+    productId: string,
+    quantity: number,
+    session: any,
+    requiredAvailableQuantity = 0,
+  ): Promise<number> {
+    let before: any = await this.truckModel.findOneAndUpdate(
+      {
+        _id: truckId,
+        isDeleted: false,
+        ...(requiredAvailableQuantity > 0
+          ? {
+              inventory: {
+                $elemMatch: {
+                  productId,
+                  qty: { $gte: requiredAvailableQuantity },
+                },
+              },
+            }
+          : { 'inventory.productId': productId }),
+      },
+      { $inc: { 'inventory.$.qty': -quantity } },
+      { new: false, session },
+    );
+    if (before) {
+      return Number(
+        before.inventory.find(
+          (entry) => String(entry.productId) === String(productId),
+        )?.qty || 0,
+      );
+    }
+
+    if (requiredAvailableQuantity > 0) {
+      const current: any = await this.truckModel
+        .findOne({ _id: truckId, isDeleted: false })
+        .select('inventory')
+        .session(session)
+        .lean();
+      const availableQuantity = Number(
+        current?.inventory?.find(
+          (entry) => String(entry.productId) === String(productId),
+        )?.qty || 0,
+      );
+      throw new ConflictException({
+        code: 'INSUFFICIENT_GIFT_STOCK',
+        message: 'Xe không đủ hàng thực tế để xuất quà tặng',
+        details: {
+          truckId,
+          productId,
+          availableQuantity,
+          requestedQuantity: requiredAvailableQuantity,
+        },
+      });
+    }
+
+    const truckBeforePush: any = await this.truckModel.findOneAndUpdate(
+      {
+        _id: truckId,
+        isDeleted: false,
+        'inventory.productId': { $ne: productId },
+      },
+      { $push: { inventory: { productId, qty: -quantity } } },
+      { new: false, session },
+    );
+    if (truckBeforePush) return 0;
+
+    // Một transaction đồng thời có thể vừa tạo dòng sản phẩm. Thử trừ lại
+    // trên dòng vừa xuất hiện để không tạo hai phần tử inventory trùng nhau.
+    before = await this.truckModel.findOneAndUpdate(
+      {
+        _id: truckId,
+        isDeleted: false,
+        'inventory.productId': productId,
+      },
+      { $inc: { 'inventory.$.qty': -quantity } },
+      { new: false, session },
+    );
+    if (!before)
+      throw new ConflictException({
+        code: 'TRUCK_STOCK_CHANGED',
+        message: 'Tồn xe vừa thay đổi, vui lòng thử tạo hóa đơn lại',
+        details: { truckId, productId },
+      });
+    return Number(
+      before.inventory.find(
+        (entry) => String(entry.productId) === String(productId),
+      )?.qty || 0,
+    );
+  }
+
   private async withItemImages(documents: any[]): Promise<any[]> {
     const ids = [
       ...new Set(
@@ -970,34 +1066,16 @@ export class InvoicesService {
           if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
           for (const [productId, lines] of inventoryGroups) {
             const totalQty = lines.reduce((sum, item) => sum + item.qty, 0);
-            const before: any = await this.truckModel.findOneAndUpdate(
-              {
-                _id: dto.truckId,
-                inventory: {
-                  $elemMatch: { productId, qty: { $gte: totalQty } },
-                },
-              },
-              { $inc: { 'inventory.$.qty': -totalQty } },
-              { new: false, session },
+            const giftQty = lines
+              .filter((item) => item.lineType === InvoiceLineType.GIFT)
+              .reduce((sum, item) => sum + item.qty, 0);
+            let quantityBefore = await this.deductTruckStockAllowNegative(
+              String(dto.truckId),
+              productId,
+              totalQty,
+              session,
+              giftQty,
             );
-            if (!before)
-              throw new ConflictException({
-                code: lines.some(
-                  (item) => item.lineType === InvoiceLineType.GIFT,
-                )
-                  ? 'INSUFFICIENT_GIFT_STOCK'
-                  : 'INSUFFICIENT_TRUCK_STOCK',
-                message: 'Tổng số lượng bán và quà vượt tồn kho trên xe',
-                details: {
-                  truckId: dto.truckId,
-                  productId,
-                  requestedQuantity: totalQty,
-                },
-              });
-            let quantityBefore =
-              before.inventory.find(
-                (entry) => String(entry.productId) === productId,
-              )?.qty || 0;
             for (const item of lines) {
               const quantityAfter = quantityBefore - item.qty;
               movementInputs.push({
@@ -1017,11 +1095,6 @@ export class InvoicesService {
               quantityBefore = quantityAfter;
             }
           }
-          await this.truckModel.updateOne(
-            { _id: dto.truckId },
-            { $pull: { inventory: { qty: { $lte: 0 } } } },
-            { session },
-          );
         }
         if (manualGiftLine) {
           const fromWarehouse =
@@ -1093,7 +1166,7 @@ export class InvoicesService {
             });
             await this.truckModel.updateOne(
               { _id: sourceTruckId },
-              { $pull: { inventory: { qty: { $lte: 0 } } } },
+              { $pull: { inventory: { qty: 0 } } },
               { session },
             );
           }

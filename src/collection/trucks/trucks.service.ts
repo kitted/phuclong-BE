@@ -1,89 +1,185 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { getConnectionToken, InjectModel } from 'nestjs-typegoose';
 import { ReturnModelType } from '@typegoose/typegoose';
 import { Connection, Types } from 'mongoose';
 import { Trucks } from './schemas/trucks.schema';
 import { Products } from '../products/schemas/products.schema';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
-import { TruckTransferCounters, TruckTransfers, TruckTransferType } from './schemas/truck-transfers.schema';
-import { AvailableProductsQueryDto, ChangeTruckStatusDto, CreateTruckDto, LoadGoodsDto, ReturnGoodsDto, ReverseTruckTransferDto, TruckGoodsReportQueryDto, TruckListQueryDto, TruckStatus, TruckToTruckTransferDto, TruckTransferQueryDto, UpdateTruckDto } from './dtos/trucks.dto';
+import {
+  TruckTransferCounters,
+  TruckTransfers,
+  TruckTransferType,
+} from './schemas/truck-transfers.schema';
+import {
+  AvailableProductsQueryDto,
+  ChangeTruckStatusDto,
+  CreateTruckDto,
+  LoadGoodsDto,
+  ReturnGoodsDto,
+  ReverseTruckTransferDto,
+  TruckGoodsReportQueryDto,
+  TruckListQueryDto,
+  TruckStatus,
+  TruckToTruckTransferDto,
+  TruckTransferQueryDto,
+  UpdateTruckDto,
+} from './dtos/trucks.dto';
 import { ID } from '../../core/interfaces/id.interface';
 import { InventoryMovementsService } from '../inventory/inventory-movements.service';
-import { InventoryLocationType, InventoryMovementType } from '../inventory/schemas/inventory-movement.schema';
+import {
+  InventoryLocationType,
+  InventoryMovementType,
+} from '../inventory/schemas/inventory-movement.schema';
 import { Users, UserStatus } from '../users/schemas/users.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
 import { AvailableDriversQueryDto } from './dtos/trucks.dto';
 import * as ExcelJS from 'exceljs';
 import { vietnamDateBoundary } from './truck-transfer-date';
-import { Invoices, InvoiceLineType, InvoiceStatus } from '../invoices/schemas/invoices.schema';
+import {
+  Invoices,
+  InvoiceLineType,
+  InvoiceStatus,
+} from '../invoices/schemas/invoices.schema';
 import { InventoryMovements } from '../inventory/schemas/inventory-movement.schema';
-import { CustomerReturns, ReturnItemType } from '../customer-returns/schemas/customer-returns.schema';
-import { TruckStockChecks, TruckStockCheckStatus } from './schemas/truck-stock-checks.schema';
+import {
+  CustomerReturns,
+  ReturnItemType,
+} from '../customer-returns/schemas/customer-returns.schema';
+import {
+  TruckStockChecks,
+  TruckStockCheckStatus,
+} from './schemas/truck-stock-checks.schema';
 import { normalizeExcelHeader } from '../../core/excel-import';
 
 @Injectable()
 export class TrucksService {
   constructor(
     @InjectModel(Trucks) private readonly model: ReturnModelType<typeof Trucks>,
-    @InjectModel(Products) private readonly productModel: ReturnModelType<typeof Products>,
-    @InjectModel(WebsiteProducts) private readonly websiteProductModel: ReturnModelType<typeof WebsiteProducts>,
-    @InjectModel(TruckTransfers) private readonly transferModel: ReturnModelType<typeof TruckTransfers>,
-    @InjectModel(TruckTransferCounters) private readonly transferCounterModel: ReturnModelType<typeof TruckTransferCounters>,
-    @InjectModel(Users) private readonly userModel: ReturnModelType<typeof Users>,
-    @InjectModel(Invoices) private readonly invoiceModel: ReturnModelType<typeof Invoices>,
-    @InjectModel(InventoryMovements) private readonly movementModel: ReturnModelType<typeof InventoryMovements>,
-    @InjectModel(CustomerReturns) private readonly customerReturnModel: ReturnModelType<typeof CustomerReturns>,
-    @InjectModel(TruckStockChecks) private readonly stockCheckModel: ReturnModelType<typeof TruckStockChecks>,
+    @InjectModel(Products)
+    private readonly productModel: ReturnModelType<typeof Products>,
+    @InjectModel(WebsiteProducts)
+    private readonly websiteProductModel: ReturnModelType<
+      typeof WebsiteProducts
+    >,
+    @InjectModel(TruckTransfers)
+    private readonly transferModel: ReturnModelType<typeof TruckTransfers>,
+    @InjectModel(TruckTransferCounters)
+    private readonly transferCounterModel: ReturnModelType<
+      typeof TruckTransferCounters
+    >,
+    @InjectModel(Users)
+    private readonly userModel: ReturnModelType<typeof Users>,
+    @InjectModel(Invoices)
+    private readonly invoiceModel: ReturnModelType<typeof Invoices>,
+    @InjectModel(InventoryMovements)
+    private readonly movementModel: ReturnModelType<typeof InventoryMovements>,
+    @InjectModel(CustomerReturns)
+    private readonly customerReturnModel: ReturnModelType<
+      typeof CustomerReturns
+    >,
+    @InjectModel(TruckStockChecks)
+    private readonly stockCheckModel: ReturnModelType<typeof TruckStockChecks>,
     private readonly movements: InventoryMovementsService,
     @Inject(getConnectionToken()) private readonly connection: Connection,
   ) {}
 
-  private positiveInt(value: string | undefined, fallback: number, max?: number) {
+  private positiveInt(
+    value: string | undefined,
+    fallback: number,
+    max?: number,
+  ) {
     const number = Number(value || fallback);
-    if (!Number.isInteger(number) || number < 1 || (max && number > max)) throw new BadRequestException('Tham số phân trang không hợp lệ');
+    if (!Number.isInteger(number) || number < 1 || (max && number > max))
+      throw new BadRequestException('Tham số phân trang không hợp lệ');
     return number;
   }
 
-  private normalizePlate(value: string) { return value.trim().toUpperCase().replace(/\s+/g, ''); }
+  private normalizePlate(value: string) {
+    return value.trim().toUpperCase().replace(/\s+/g, '');
+  }
 
   private async nextCode() {
-    const latest = await this.model.findOne({ code: /^T\d+$/ }).sort({ code: -1 }).select('code').lean();
+    const latest = await this.model
+      .findOne({ code: /^T\d+$/ })
+      .sort({ code: -1 })
+      .select('code')
+      .lean();
     return `T${String(Number(latest?.code?.match(/\d+$/)?.[0] || 0) + 1).padStart(2, '0')}`;
   }
 
-  private async resolveDriver(driverId?: string | null, currentTruckId?: string) {
-    if (driverId === null) return { driverId: null, driverName: null, driverPhone: null };
+  private async resolveDriver(
+    driverId?: string | null,
+    currentTruckId?: string,
+  ) {
+    if (driverId === null)
+      return { driverId: null, driverName: null, driverPhone: null };
     if (driverId === undefined) return {};
-    if (!Types.ObjectId.isValid(driverId)) throw new BadRequestException('driverId không hợp lệ');
-    const employee: any = await this.userModel.findOne({
-      _id: driverId,
-      role: RoleEnum.STAFF,
-      status: UserStatus.ACTIVE,
-      isDeleted: false,
-    }).select('employeeCode fullName phone status').lean();
-    if (!employee) throw new BadRequestException('Nhân viên không hoạt động hoặc không thể được phân công làm tài xế');
-    const assigned: any = await this.model.findOne({
-      driverId,
-      isDeleted: false,
-      ...(currentTruckId ? { _id: { $ne: currentTruckId } } : {}),
-    }).select('code').lean();
-    if (assigned) throw new ConflictException(`Nhân viên ${employee.employeeCode || employee.fullName} đang được phân công cho xe ${assigned.code}`);
-    return { driverId: employee._id, driverName: employee.fullName || employee.employeeCode || '', driverPhone: employee.phone || '' };
+    if (!Types.ObjectId.isValid(driverId))
+      throw new BadRequestException('driverId không hợp lệ');
+    const employee: any = await this.userModel
+      .findOne({
+        _id: driverId,
+        role: RoleEnum.STAFF,
+        status: UserStatus.ACTIVE,
+        isDeleted: false,
+      })
+      .select('employeeCode fullName phone status')
+      .lean();
+    if (!employee)
+      throw new BadRequestException(
+        'Nhân viên không hoạt động hoặc không thể được phân công làm tài xế',
+      );
+    const assigned: any = await this.model
+      .findOne({
+        driverId,
+        isDeleted: false,
+        ...(currentTruckId ? { _id: { $ne: currentTruckId } } : {}),
+      })
+      .select('code')
+      .lean();
+    if (assigned)
+      throw new ConflictException(
+        `Nhân viên ${employee.employeeCode || employee.fullName} đang được phân công cho xe ${assigned.code}`,
+      );
+    return {
+      driverId: employee._id,
+      driverName: employee.fullName || employee.employeeCode || '',
+      driverPhone: employee.phone || '',
+    };
   }
 
   async create(dto: CreateTruckDto) {
-    const code = dto.code?.trim().toUpperCase() || await this.nextCode();
+    const code = dto.code?.trim().toUpperCase() || (await this.nextCode());
     const licensePlate = this.normalizePlate(dto.licensePlate);
-    if (await this.model.exists({ code, isDeleted: false })) throw new ConflictException('Mã xe đã tồn tại');
-    if (await this.model.exists({ licensePlate, isDeleted: false })) throw new ConflictException('Biển số xe đã tồn tại');
+    if (await this.model.exists({ code, isDeleted: false }))
+      throw new ConflictException('Mã xe đã tồn tại');
+    if (await this.model.exists({ licensePlate, isDeleted: false }))
+      throw new ConflictException('Biển số xe đã tồn tại');
     const driver = await this.resolveDriver(dto.driverId);
     const { driverId: _driverId, ...safeDto } = dto as any;
-    delete safeDto.driver; delete safeDto.phone; delete safeDto.driverName; delete safeDto.driverPhone; delete safeDto.inventory;
+    delete safeDto.driver;
+    delete safeDto.phone;
+    delete safeDto.driverName;
+    delete safeDto.driverPhone;
+    delete safeDto.inventory;
     let truck: any;
     try {
-      truck = await this.model.create({ ...safeDto, ...driver, code, licensePlate, inventory: [] });
+      truck = await this.model.create({
+        ...safeDto,
+        ...driver,
+        code,
+        licensePlate,
+        inventory: [],
+      });
     } catch (error: any) {
-      if (error?.code === 11000 && error?.keyPattern?.driverId) throw new ConflictException('Nhân viên đã được phân công cho xe khác');
+      if (error?.code === 11000 && error?.keyPattern?.driverId)
+        throw new ConflictException('Nhân viên đã được phân công cho xe khác');
       throw error;
     }
     return { data: truck };
@@ -100,105 +196,264 @@ export class TrucksService {
       linked.map((item: any) => [
         String(item.inventoryProductId),
         (item.imageUrls || []).find(Boolean),
-      ])
+      ]),
     );
     return products.map((product) => ({
       ...product,
-      imageUrl: product.imageUrl || images.get(String(product._id)) || undefined,
+      imageUrl:
+        product.imageUrl || images.get(String(product._id)) || undefined,
     }));
   }
 
   private async productMapFor(trucks: any[]) {
-    const ids = [...new Set(trucks.flatMap((truck) => (truck.inventory || []).map((item) => String(item.productId))))];
-    const products = ids.length ? await this.productModel.find({ _id: { $in: ids }, isDeleted: false }).select('code name unit costPrice imageUrl').lean() : [];
+    const ids = [
+      ...new Set(
+        trucks.flatMap((truck) =>
+          (truck.inventory || []).map((item) => String(item.productId)),
+        ),
+      ),
+    ];
+    const products = ids.length
+      ? await this.productModel
+          .find({ _id: { $in: ids }, isDeleted: false })
+          .select('code name unit costPrice imageUrl')
+          .lean()
+      : [];
     const withImages = await this.withProductImages(products);
-    return new Map(withImages.map((product: any) => [String(product._id), product]));
+    return new Map(
+      withImages.map((product: any) => [String(product._id), product]),
+    );
   }
 
   private async driverMapFor(trucks: any[]) {
-    const ids = [...new Set(trucks.map((truck) => truck.driverId && String(truck.driverId)).filter(Boolean))];
-    const drivers = ids.length ? await this.userModel.find({ _id: { $in: ids }, isDeleted: false }).select('employeeCode fullName phone status').lean() : [];
+    const ids = [
+      ...new Set(
+        trucks
+          .map((truck) => truck.driverId && String(truck.driverId))
+          .filter(Boolean),
+      ),
+    ];
+    const drivers = ids.length
+      ? await this.userModel
+          .find({ _id: { $in: ids }, isDeleted: false })
+          .select('employeeCode fullName phone status')
+          .lean()
+      : [];
     return new Map(drivers.map((driver: any) => [String(driver._id), driver]));
   }
 
-  private mapTruck(truck: any, products: Map<string, any>, preview = false, drivers = new Map<string, any>()) {
-    const inventory = (truck.inventory || []).map((item) => {
-      const product = products.get(String(item.productId)); const quantity = Number(item.qty) || 0; const costPrice = Number(product?.costPrice) || 0;
-      return { productId: String(item.productId), code: product?.code || '', name: product?.name || '', unit: product?.unit || '', imageUrl: product?.imageUrl, quantity, costPrice, stockValue: quantity * costPrice };
-    }).filter((item) => item.quantity > 0);
+  private mapTruck(
+    truck: any,
+    products: Map<string, any>,
+    preview = false,
+    drivers = new Map<string, any>(),
+  ) {
+    const inventory = (truck.inventory || [])
+      .map((item) => {
+        const product = products.get(String(item.productId));
+        const quantity = Number(item.qty) || 0;
+        const costPrice = Number(product?.costPrice) || 0;
+        return {
+          productId: String(item.productId),
+          code: product?.code || '',
+          name: product?.name || '',
+          unit: product?.unit || '',
+          imageUrl: product?.imageUrl,
+          quantity,
+          costPrice,
+          stockValue: quantity * costPrice,
+        };
+      })
+      .filter((item) => item.quantity !== 0);
     const inventorySummary = {
       productTypes: inventory.length,
       totalQuantity: inventory.reduce((sum, item) => sum + item.quantity, 0),
       totalValue: inventory.reduce((sum, item) => sum + item.stockValue, 0),
+      negativeProductTypes: inventory.filter((item) => item.quantity < 0)
+        .length,
+      totalNegativeQuantity: inventory
+        .filter((item) => item.quantity < 0)
+        .reduce((sum, item) => sum + Math.abs(item.quantity), 0),
     };
-    const assignedDriver = truck.driverId ? drivers.get(String(truck.driverId)) : null;
-    const driver = assignedDriver ? { id: String(assignedDriver._id), employeeCode: assignedDriver.employeeCode, fullName: assignedDriver.fullName, phone: assignedDriver.phone, status: assignedDriver.status, isDeleted: assignedDriver.isDeleted } : null;
-    const base = { id: String(truck._id), code: truck.code, name: truck.name, licensePlate: truck.licensePlate, driver, driverName: truck.driverName || truck.driver || '', driverPhone: truck.driverPhone || truck.phone || '', status: truck.status, inventorySummary, createdAt: truck.createdAt, updatedAt: truck.updatedAt };
-    return preview ? { ...base, inventoryPreview: inventory.slice(0, 3) } : { ...base, inventory };
+    const assignedDriver = truck.driverId
+      ? drivers.get(String(truck.driverId))
+      : null;
+    const driver = assignedDriver
+      ? {
+          id: String(assignedDriver._id),
+          employeeCode: assignedDriver.employeeCode,
+          fullName: assignedDriver.fullName,
+          phone: assignedDriver.phone,
+          status: assignedDriver.status,
+          isDeleted: assignedDriver.isDeleted,
+        }
+      : null;
+    const base = {
+      id: String(truck._id),
+      code: truck.code,
+      name: truck.name,
+      licensePlate: truck.licensePlate,
+      driver,
+      driverName: truck.driverName || truck.driver || '',
+      driverPhone: truck.driverPhone || truck.phone || '',
+      status: truck.status,
+      inventorySummary,
+      createdAt: truck.createdAt,
+      updatedAt: truck.updatedAt,
+    };
+    return preview
+      ? { ...base, inventoryPreview: inventory.slice(0, 3) }
+      : { ...base, inventory };
   }
 
   async findAll(query: TruckListQueryDto): Promise<any> {
-    const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100);
+    const page = this.positiveInt(query.page, 1);
+    const limit = this.positiveInt(query.limit, 20, 100);
     const filter: any = { isDeleted: false };
     if (query.status) filter.status = query.status;
     if (query.driverId) filter.driverId = query.driverId;
     if (query.hasDriver === 'true') filter.driverId = { $type: 'objectId' };
-    if (query.hasDriver === 'false') filter.$and = [{ $or: [{ driverId: null }, { driverId: { $exists: false } }] }];
+    if (query.hasDriver === 'false')
+      filter.$and = [
+        { $or: [{ driverId: null }, { driverId: { $exists: false } }] },
+      ];
     if (query.search?.trim()) {
-      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const searchFilter = ['code', 'name', 'licensePlate', 'driverName', 'driverPhone', 'driver', 'phone'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
-      if (filter.$and) filter.$and.push({ $or: searchFilter }); else filter.$or = searchFilter;
+      const escaped = query.search
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchFilter = [
+        'code',
+        'name',
+        'licensePlate',
+        'driverName',
+        'driverPhone',
+        'driver',
+        'phone',
+      ].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
+      if (filter.$and) filter.$and.push({ $or: searchFilter });
+      else filter.$or = searchFilter;
     }
-    if (query.hasInventory === 'true') filter.$expr = { $gt: [{ $sum: '$inventory.qty' }, 0] };
-    if (query.hasInventory === 'false') filter.$expr = { $lte: [{ $sum: '$inventory.qty' }, 0] };
-    const sortBy = query.sortBy || 'createdAt'; const direction = query.sortOrder === 'asc' ? 1 : -1;
+    if (query.hasInventory === 'true')
+      filter.$expr = { $gt: [{ $sum: '$inventory.qty' }, 0] };
+    if (query.hasInventory === 'false')
+      filter.$expr = { $lte: [{ $sum: '$inventory.qty' }, 0] };
+    const sortBy = query.sortBy || 'createdAt';
+    const direction = query.sortOrder === 'asc' ? 1 : -1;
     const [trucks, totalItems] = await Promise.all([
-      this.model.find(filter).sort({ [sortBy]: direction, _id: direction }).skip((page - 1) * limit).limit(limit).lean(),
+      this.model
+        .find(filter)
+        .sort({ [sortBy]: direction, _id: direction })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
       this.model.countDocuments(filter),
     ]);
-    const [products, drivers] = await Promise.all([this.productMapFor(trucks), this.driverMapFor(trucks)]);
-    return { data: trucks.map((truck) => this.mapTruck(truck, products, true, drivers)), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+    const [products, drivers] = await Promise.all([
+      this.productMapFor(trucks),
+      this.driverMapFor(trucks),
+    ]);
+    return {
+      data: trucks.map((truck) =>
+        this.mapTruck(truck, products, true, drivers),
+      ),
+      meta: {
+        page,
+        limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+      },
+    };
   }
 
   async summary() {
-    const trucks = await this.model.find({ isDeleted: false }).select('status inventory driverId').lean();
-    const products = await this.productMapFor(trucks); const mapped = trucks.map((truck) => this.mapTruck(truck, products));
-    return { data: {
-      totalTrucks: trucks.length,
-      activeTrucks: trucks.filter((truck) => truck.status === TruckStatus.ACTIVE).length,
-      inactiveTrucks: trucks.filter((truck) => truck.status === TruckStatus.INACTIVE).length,
-      trucksWithInventory: mapped.filter((truck) => truck.inventorySummary.totalQuantity > 0).length,
-      trucksWithoutDriver: trucks.filter((truck) => !truck.driverId).length,
-      totalTruckQuantity: mapped.reduce((sum, truck) => sum + truck.inventorySummary.totalQuantity, 0),
-      totalTruckInventoryValue: mapped.reduce((sum, truck) => sum + truck.inventorySummary.totalValue, 0),
-    } };
+    const trucks = await this.model
+      .find({ isDeleted: false })
+      .select('status inventory driverId')
+      .lean();
+    const products = await this.productMapFor(trucks);
+    const mapped = trucks.map((truck) => this.mapTruck(truck, products));
+    return {
+      data: {
+        totalTrucks: trucks.length,
+        activeTrucks: trucks.filter(
+          (truck) => truck.status === TruckStatus.ACTIVE,
+        ).length,
+        inactiveTrucks: trucks.filter(
+          (truck) => truck.status === TruckStatus.INACTIVE,
+        ).length,
+        trucksWithInventory: mapped.filter(
+          (truck) => truck.inventorySummary.totalQuantity > 0,
+        ).length,
+        trucksWithNegativeBalance: mapped.filter(
+          (truck) => truck.inventorySummary.negativeProductTypes > 0,
+        ).length,
+        trucksWithoutDriver: trucks.filter((truck) => !truck.driverId).length,
+        totalTruckQuantity: mapped.reduce(
+          (sum, truck) => sum + truck.inventorySummary.totalQuantity,
+          0,
+        ),
+        totalTruckInventoryValue: mapped.reduce(
+          (sum, truck) => sum + truck.inventorySummary.totalValue,
+          0,
+        ),
+      },
+    };
   }
 
   async findOne(id: ID | string) {
-    const truck = await this.model.findOne({ _id: id, isDeleted: false }).lean();
+    const truck = await this.model
+      .findOne({ _id: id, isDeleted: false })
+      .lean();
     if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
-    const [products, drivers] = await Promise.all([this.productMapFor([truck]), this.driverMapFor([truck])]);
+    const [products, drivers] = await Promise.all([
+      this.productMapFor([truck]),
+      this.driverMapFor([truck]),
+    ]);
     return { data: this.mapTruck(truck, products, false, drivers) };
   }
 
   async update(id: ID | string, dto: UpdateTruckDto) {
     const update: any = { ...dto };
-    delete update.driver; delete update.phone; delete update.driverName; delete update.driverPhone; delete update.inventory;
+    delete update.driver;
+    delete update.phone;
+    delete update.driverName;
+    delete update.driverPhone;
+    delete update.inventory;
     if (dto.code) {
       update.code = dto.code.trim().toUpperCase();
-      if (await this.model.exists({ code: update.code, _id: { $ne: id }, isDeleted: false })) throw new ConflictException('Mã xe đã tồn tại');
+      if (
+        await this.model.exists({
+          code: update.code,
+          _id: { $ne: id },
+          isDeleted: false,
+        })
+      )
+        throw new ConflictException('Mã xe đã tồn tại');
     }
     if (dto.licensePlate) {
       update.licensePlate = this.normalizePlate(dto.licensePlate);
-      if (await this.model.exists({ licensePlate: update.licensePlate, _id: { $ne: id }, isDeleted: false })) throw new ConflictException('Biển số xe đã tồn tại');
+      if (
+        await this.model.exists({
+          licensePlate: update.licensePlate,
+          _id: { $ne: id },
+          isDeleted: false,
+        })
+      )
+        throw new ConflictException('Biển số xe đã tồn tại');
     }
-    if (Object.prototype.hasOwnProperty.call(dto, 'driverId')) Object.assign(update, await this.resolveDriver(dto.driverId, String(id)));
+    if (Object.prototype.hasOwnProperty.call(dto, 'driverId'))
+      Object.assign(update, await this.resolveDriver(dto.driverId, String(id)));
     else delete update.driverId;
     let truck: any;
     try {
-      truck = await this.model.findOneAndUpdate({ _id: id, isDeleted: false }, update, { new: true, runValidators: true });
+      truck = await this.model.findOneAndUpdate(
+        { _id: id, isDeleted: false },
+        update,
+        { new: true, runValidators: true },
+      );
     } catch (error: any) {
-      if (error?.code === 11000 && error?.keyPattern?.driverId) throw new ConflictException('Nhân viên đã được phân công cho xe khác');
+      if (error?.code === 11000 && error?.keyPattern?.driverId)
+        throw new ConflictException('Nhân viên đã được phân công cho xe khác');
       throw error;
     }
     if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
@@ -206,8 +461,13 @@ export class TrucksService {
   }
 
   async changeStatus(id: string, dto: ChangeTruckStatusDto) {
-    if (!Object.values(TruckStatus).includes(dto.status)) throw new BadRequestException('Trạng thái xe không hợp lệ');
-    const truck = await this.model.findOneAndUpdate({ _id: id, isDeleted: false }, { status: dto.status }, { new: true, runValidators: true });
+    if (!Object.values(TruckStatus).includes(dto.status))
+      throw new BadRequestException('Trạng thái xe không hợp lệ');
+    const truck = await this.model.findOneAndUpdate(
+      { _id: id, isDeleted: false },
+      { status: dto.status },
+      { new: true, runValidators: true },
+    );
     if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
     return { data: truck };
   }
@@ -215,67 +475,200 @@ export class TrucksService {
   async remove(id: ID | string) {
     const truck = await this.model.findOne({ _id: id, isDeleted: false });
     if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
-    if (truck.inventory.some((item) => item.qty > 0)) throw new ConflictException({ code: 'TRUCK_HAS_INVENTORY', message: 'Không thể xóa xe khi vẫn còn hàng' });
-    truck.isDeleted = true; truck.deletedAt = new Date(); await truck.save();
+    if (truck.inventory.some((item) => Number(item.qty) !== 0))
+      throw new ConflictException({
+        code: 'TRUCK_HAS_INVENTORY_BALANCE',
+        message:
+          'Không thể xóa xe khi còn tồn hàng hoặc số dư hàng âm chưa được bù',
+      });
+    truck.isDeleted = true;
+    truck.deletedAt = new Date();
+    await truck.save();
     return { data: { id: String(truck._id), deleted: true } };
   }
 
   async availableProducts(query: AvailableProductsQueryDto) {
-    const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 1000);
+    const page = this.positiveInt(query.page, 1);
+    const limit = this.positiveInt(query.limit, 20, 1000);
     const filter: any = { isDeleted: false, stock: { $gt: 0 } };
     if (query.search?.trim()) {
-      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter.$or = [{ code: { $regex: escaped, $options: 'i' } }, { name: { $regex: escaped, $options: 'i' } }];
+      const escaped = query.search
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { code: { $regex: escaped, $options: 'i' } },
+        { name: { $regex: escaped, $options: 'i' } },
+      ];
     }
-    const [products, totalItems] = await Promise.all([this.productModel.find(filter).sort({ code: 1 }).skip((page - 1) * limit).limit(limit).lean(), this.productModel.countDocuments(filter)]);
+    const [products, totalItems] = await Promise.all([
+      this.productModel
+        .find(filter)
+        .sort({ code: 1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      this.productModel.countDocuments(filter),
+    ]);
     const withImages = await this.withProductImages(products);
-    return { data: withImages.map((product: any) => ({ id: String(product._id), productId: String(product._id), code: product.code, name: product.name, unit: product.unit || '', imageUrl: product.imageUrl, stock: product.stock || 0, warehouseQuantity: product.stock || 0, costPrice: product.costPrice || 0 })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+    return {
+      data: withImages.map((product: any) => ({
+        id: String(product._id),
+        productId: String(product._id),
+        code: product.code,
+        name: product.name,
+        unit: product.unit || '',
+        imageUrl: product.imageUrl,
+        stock: product.stock || 0,
+        warehouseQuantity: product.stock || 0,
+        costPrice: product.costPrice || 0,
+      })),
+      meta: {
+        page,
+        limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+      },
+    };
   }
 
   async availableDrivers(query: AvailableDriversQueryDto) {
     const limit = this.positiveInt(query.limit, 20, 100);
-    const assignments = await this.model.find({ isDeleted: false }).select('code name driverId').lean();
+    const assignments = await this.model
+      .find({ isDeleted: false })
+      .select('code name driverId')
+      .lean();
     const blockedIds = assignments
-      .filter((truck) => truck.driverId && String(truck._id) !== query.excludeTruckId)
+      .filter(
+        (truck) => truck.driverId && String(truck._id) !== query.excludeTruckId,
+      )
       .map((truck) => truck.driverId);
-    const filter: any = { role: RoleEnum.STAFF, status: UserStatus.ACTIVE, isDeleted: false };
+    const filter: any = {
+      role: RoleEnum.STAFF,
+      status: UserStatus.ACTIVE,
+      isDeleted: false,
+    };
     if (blockedIds.length) filter._id = { $nin: blockedIds };
     if (query.search?.trim()) {
-      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter.$or = ['employeeCode', 'fullName', 'phone'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } }));
+      const escaped = query.search
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = ['employeeCode', 'fullName', 'phone'].map((field) => ({
+        [field]: { $regex: escaped, $options: 'i' },
+      }));
     }
-    const employees = await this.userModel.find(filter).select('employeeCode fullName phone status').sort({ employeeCode: 1 }).limit(limit).lean();
-    const assignmentByDriver = new Map(assignments.filter((truck) => truck.driverId).map((truck) => [String(truck.driverId), { id: String(truck._id), code: truck.code, name: truck.name }]));
-    return { data: employees.map((employee: any) => ({ id: String(employee._id), employeeCode: employee.employeeCode, fullName: employee.fullName, phone: employee.phone, status: employee.status, assignedTruck: assignmentByDriver.get(String(employee._id)) || null })) };
+    const employees = await this.userModel
+      .find(filter)
+      .select('employeeCode fullName phone status')
+      .sort({ employeeCode: 1 })
+      .limit(limit)
+      .lean();
+    const assignmentByDriver = new Map(
+      assignments
+        .filter((truck) => truck.driverId)
+        .map((truck) => [
+          String(truck.driverId),
+          { id: String(truck._id), code: truck.code, name: truck.name },
+        ]),
+    );
+    return {
+      data: employees.map((employee: any) => ({
+        id: String(employee._id),
+        employeeCode: employee.employeeCode,
+        fullName: employee.fullName,
+        phone: employee.phone,
+        status: employee.status,
+        assignedTruck: assignmentByDriver.get(String(employee._id)) || null,
+      })),
+    };
   }
 
-  async availableTruckProducts(truckId: string, query: AvailableProductsQueryDto) {
-    const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100);
-    const truck: any = await this.model.findOne({ _id: truckId, isDeleted: false }).select('inventory').lean();
+  async availableTruckProducts(
+    truckId: string,
+    query: AvailableProductsQueryDto,
+  ) {
+    const page = this.positiveInt(query.page, 1);
+    const limit = this.positiveInt(query.limit, 20, 100);
+    const truck: any = await this.model
+      .findOne({ _id: truckId, isDeleted: false })
+      .select('inventory')
+      .lean();
     if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
-    const quantities = new Map((truck.inventory || []).filter((item) => item.qty > 0).map((item) => [String(item.productId), item.qty]));
-    const filter: any = { _id: { $in: [...quantities.keys()] }, isDeleted: false };
+    const allowNegative = query.allowNegative === 'true';
+    const quantities = new Map<string, number>(
+      (truck.inventory || []).map((item) => [
+        String(item.productId),
+        Number(item.qty) || 0,
+      ]),
+    );
+    const positiveProductIds = [...quantities.entries()]
+      .filter(([, qty]) => qty > 0)
+      .map(([productId]) => productId);
+    const filter: any = {
+      isDeleted: false,
+      ...(allowNegative ? {} : { _id: { $in: positiveProductIds } }),
+    };
     if (query.search?.trim()) {
-      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      filter.$or = [{ code: { $regex: escaped, $options: 'i' } }, { name: { $regex: escaped, $options: 'i' } }, { barcode: { $regex: escaped, $options: 'i' } }];
+      const escaped = query.search
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { code: { $regex: escaped, $options: 'i' } },
+        { name: { $regex: escaped, $options: 'i' } },
+        { barcode: { $regex: escaped, $options: 'i' } },
+      ];
     }
-    const [products, totalItems] = await Promise.all([this.productModel.find(filter).sort({ code: 1 }).skip((page - 1) * limit).limit(limit).lean(), this.productModel.countDocuments(filter)]);
+    const [products, totalItems] = await Promise.all([
+      this.productModel
+        .find(filter)
+        .sort({ code: 1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      this.productModel.countDocuments(filter),
+    ]);
     const withImages = await this.withProductImages(products);
-    return { data: withImages.map((product: any) => ({ id: String(product._id), productId: String(product._id), code: product.code, name: product.name, unit: product.unit || '', imageUrl: product.imageUrl, quantity: quantities.get(String(product._id)) || 0, sellPrice: product.sellPrice || 0 })), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+    return {
+      data: withImages.map((product: any) => ({
+        id: String(product._id),
+        productId: String(product._id),
+        code: product.code,
+        name: product.name,
+        unit: product.unit || '',
+        imageUrl: product.imageUrl,
+        quantity: quantities.get(String(product._id)) || 0,
+        sellPrice: product.sellPrice || 0,
+        allowsNegativeStock: allowNegative,
+      })),
+      meta: {
+        page,
+        limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+      },
+    };
   }
 
   private mergedItems(items: Array<{ productId: string; qty: number }>) {
-    if (!Array.isArray(items) || !items.length) throw new BadRequestException('Phiếu phải có ít nhất một sản phẩm');
+    if (!Array.isArray(items) || !items.length)
+      throw new BadRequestException('Phiếu phải có ít nhất một sản phẩm');
     const merged = new Map<string, number>();
     for (const item of items) {
-      if (!Types.ObjectId.isValid(item.productId) || !Number.isInteger(item.qty) || item.qty < 1) throw new BadRequestException('Sản phẩm hoặc số lượng không hợp lệ');
+      if (
+        !Types.ObjectId.isValid(item.productId) ||
+        !Number.isInteger(item.qty) ||
+        item.qty < 1
+      )
+        throw new BadRequestException('Sản phẩm hoặc số lượng không hợp lệ');
       merged.set(item.productId, (merged.get(item.productId) || 0) + item.qty);
     }
     return [...merged].map(([productId, qty]) => ({ productId, qty }));
   }
 
   private transferCode(type: TruckTransferType, requested?: string) {
-    return requested?.trim().toUpperCase() || `${type === TruckTransferType.LOAD ? 'PX' : 'PH'}-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Date.now().toString().slice(-6)}`;
+    return (
+      requested?.trim().toUpperCase() ||
+      `${type === TruckTransferType.LOAD ? 'PX' : 'PH'}-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Date.now().toString().slice(-6)}`
+    );
   }
 
   async loadGoods(id: ID | string, dto: LoadGoodsDto, createdBy?: string) {
@@ -286,227 +679,1511 @@ export class TrucksService {
     return this.moveGoods(String(id), dto, TruckTransferType.RETURN, createdBy);
   }
 
-  private truckTransferDay(date: Date) { const value = new Date(date.getTime() + 25200000); return `${String(value.getUTCFullYear()).slice(2)}${String(value.getUTCMonth() + 1).padStart(2, '0')}${String(value.getUTCDate()).padStart(2, '0')}`; }
-  private async truckTransferContext(sourceTruckId: string, dto: TruckToTruckTransferDto, session: any = null) {
-    if (!Types.ObjectId.isValid(sourceTruckId) || !Types.ObjectId.isValid(dto.destinationTruckId)) throw new BadRequestException('Xe nguồn hoặc xe nhận không hợp lệ');
-    if (sourceTruckId === dto.destinationTruckId) throw new BadRequestException('Xe nguồn và xe nhận không được giống nhau');
-    const items = this.mergedItems(dto.items); const date = dto.date ? new Date(dto.date) : new Date(); if (Number.isNaN(+date)) throw new BadRequestException('Ngày điều chuyển không hợp lệ');
-    const [sourceTruck, destinationTruck]: any[] = await Promise.all([this.model.findOne({ _id: sourceTruckId, isDeleted: false }).session(session).lean(), this.model.findOne({ _id: dto.destinationTruckId, isDeleted: false }).session(session).lean()]);
-    if (!sourceTruck) throw new NotFoundException('Không tìm thấy xe nguồn'); if (!destinationTruck) throw new NotFoundException('Không tìm thấy xe nhận');
-    if (destinationTruck.status !== TruckStatus.ACTIVE) throw new ConflictException('Xe nhận đang ngừng hoạt động');
-    const driverIds = [sourceTruck.driverId, destinationTruck.driverId].filter(Boolean); const drivers: any[] = driverIds.length ? await this.userModel.find({ _id: { $in: driverIds }, isDeleted: false }).select('employeeCode fullName phone role status').session(session).lean() : [];
-    const driverMap = new Map(drivers.map((driver) => [String(driver._id), driver])); const sourceDriver: any = sourceTruck.driverId ? driverMap.get(String(sourceTruck.driverId)) : null; const destinationDriver: any = destinationTruck.driverId ? driverMap.get(String(destinationTruck.driverId)) : null;
-    if (!destinationDriver || destinationDriver.role !== RoleEnum.STAFF || destinationDriver.status !== UserStatus.ACTIVE) throw new ConflictException('Xe nhận phải có tài xế đang hoạt động');
-    const products: any[] = await this.productModel.find({ _id: { $in: items.map((item) => item.productId) }, isDeleted: false }).select('code name unit costPrice imageUrl').session(session).lean(); if (products.length !== items.length) throw new BadRequestException('Một hoặc nhiều sản phẩm không tồn tại');
-    const productMap = new Map<string, any>(products.map((product) => [String(product._id), product])); const sourceInventory = new Map<string, number>((sourceTruck.inventory || []).map((item) => [String(item.productId), Number(item.qty) || 0])); const destinationInventory = new Map<string, number>((destinationTruck.inventory || []).map((item) => [String(item.productId), Number(item.qty) || 0]));
-    const snapshots = items.map((item) => { const product: any = productMap.get(item.productId); const sourceQuantity = sourceInventory.get(item.productId) || 0; if (sourceQuantity < item.qty) throw new ConflictException({ code: 'SOURCE_TRUCK_INSUFFICIENT_STOCK', message: 'Xe nguồn không đủ hàng', details: { productId: item.productId, availableQuantity: sourceQuantity, requestedQuantity: item.qty } }); const unitCost = Number(product.costPrice) || 0; return { productId: item.productId, productCode: product.code, productName: product.name, imageUrl: product.imageUrl, unit: product.unit || '', qty: item.qty, quantity: item.qty, unitCost, costPrice: unitCost, totalValue: item.qty * unitCost, sourceQuantityBefore: sourceQuantity, sourceQuantityAfter: sourceQuantity - item.qty, destinationQuantityBefore: destinationInventory.get(item.productId) || 0, destinationQuantityAfter: (destinationInventory.get(item.productId) || 0) + item.qty }; });
-    return { sourceTruck, destinationTruck, sourceDriver, destinationDriver, date, snapshots };
+  private truckTransferDay(date: Date) {
+    const value = new Date(date.getTime() + 25200000);
+    return `${String(value.getUTCFullYear()).slice(2)}${String(value.getUTCMonth() + 1).padStart(2, '0')}${String(value.getUTCDate()).padStart(2, '0')}`;
+  }
+  private async truckTransferContext(
+    sourceTruckId: string,
+    dto: TruckToTruckTransferDto,
+    session: any = null,
+  ) {
+    if (
+      !Types.ObjectId.isValid(sourceTruckId) ||
+      !Types.ObjectId.isValid(dto.destinationTruckId)
+    )
+      throw new BadRequestException('Xe nguồn hoặc xe nhận không hợp lệ');
+    if (sourceTruckId === dto.destinationTruckId)
+      throw new BadRequestException(
+        'Xe nguồn và xe nhận không được giống nhau',
+      );
+    const items = this.mergedItems(dto.items);
+    const date = dto.date ? new Date(dto.date) : new Date();
+    if (Number.isNaN(+date))
+      throw new BadRequestException('Ngày điều chuyển không hợp lệ');
+    const [sourceTruck, destinationTruck]: any[] = await Promise.all([
+      this.model
+        .findOne({ _id: sourceTruckId, isDeleted: false })
+        .session(session)
+        .lean(),
+      this.model
+        .findOne({ _id: dto.destinationTruckId, isDeleted: false })
+        .session(session)
+        .lean(),
+    ]);
+    if (!sourceTruck) throw new NotFoundException('Không tìm thấy xe nguồn');
+    if (!destinationTruck)
+      throw new NotFoundException('Không tìm thấy xe nhận');
+    if (destinationTruck.status !== TruckStatus.ACTIVE)
+      throw new ConflictException('Xe nhận đang ngừng hoạt động');
+    const driverIds = [sourceTruck.driverId, destinationTruck.driverId].filter(
+      Boolean,
+    );
+    const drivers: any[] = driverIds.length
+      ? await this.userModel
+          .find({ _id: { $in: driverIds }, isDeleted: false })
+          .select('employeeCode fullName phone role status')
+          .session(session)
+          .lean()
+      : [];
+    const driverMap = new Map(
+      drivers.map((driver) => [String(driver._id), driver]),
+    );
+    const sourceDriver: any = sourceTruck.driverId
+      ? driverMap.get(String(sourceTruck.driverId))
+      : null;
+    const destinationDriver: any = destinationTruck.driverId
+      ? driverMap.get(String(destinationTruck.driverId))
+      : null;
+    if (
+      !destinationDriver ||
+      destinationDriver.role !== RoleEnum.STAFF ||
+      destinationDriver.status !== UserStatus.ACTIVE
+    )
+      throw new ConflictException('Xe nhận phải có tài xế đang hoạt động');
+    const products: any[] = await this.productModel
+      .find({
+        _id: { $in: items.map((item) => item.productId) },
+        isDeleted: false,
+      })
+      .select('code name unit costPrice imageUrl')
+      .session(session)
+      .lean();
+    if (products.length !== items.length)
+      throw new BadRequestException('Một hoặc nhiều sản phẩm không tồn tại');
+    const productMap = new Map<string, any>(
+      products.map((product) => [String(product._id), product]),
+    );
+    const sourceInventory = new Map<string, number>(
+      (sourceTruck.inventory || []).map((item) => [
+        String(item.productId),
+        Number(item.qty) || 0,
+      ]),
+    );
+    const destinationInventory = new Map<string, number>(
+      (destinationTruck.inventory || []).map((item) => [
+        String(item.productId),
+        Number(item.qty) || 0,
+      ]),
+    );
+    const snapshots = items.map((item) => {
+      const product: any = productMap.get(item.productId);
+      const sourceQuantity = sourceInventory.get(item.productId) || 0;
+      if (sourceQuantity < item.qty)
+        throw new ConflictException({
+          code: 'SOURCE_TRUCK_INSUFFICIENT_STOCK',
+          message: 'Xe nguồn không đủ hàng',
+          details: {
+            productId: item.productId,
+            availableQuantity: sourceQuantity,
+            requestedQuantity: item.qty,
+          },
+        });
+      const unitCost = Number(product.costPrice) || 0;
+      return {
+        productId: item.productId,
+        productCode: product.code,
+        productName: product.name,
+        imageUrl: product.imageUrl,
+        unit: product.unit || '',
+        qty: item.qty,
+        quantity: item.qty,
+        unitCost,
+        costPrice: unitCost,
+        totalValue: item.qty * unitCost,
+        sourceQuantityBefore: sourceQuantity,
+        sourceQuantityAfter: sourceQuantity - item.qty,
+        destinationQuantityBefore:
+          destinationInventory.get(item.productId) || 0,
+        destinationQuantityAfter:
+          (destinationInventory.get(item.productId) || 0) + item.qty,
+      };
+    });
+    return {
+      sourceTruck,
+      destinationTruck,
+      sourceDriver,
+      destinationDriver,
+      date,
+      snapshots,
+    };
   }
 
-  async previewTruckTransfer(sourceTruckId: string, dto: TruckToTruckTransferDto): Promise<any> {
-    const context = await this.truckTransferContext(sourceTruckId, dto); const products = await this.productMapFor([context.sourceTruck, context.destinationTruck]); const drivers = await this.driverMapFor([context.sourceTruck, context.destinationTruck]);
-    return { data: { sourceTruck: this.mapTruck(context.sourceTruck, products, false, drivers), destinationTruck: this.mapTruck(context.destinationTruck, products, false, drivers), items: context.snapshots, totalQuantity: context.snapshots.reduce((sum, item) => sum + item.qty, 0), totalValue: context.snapshots.reduce((sum, item) => sum + item.totalValue, 0), warnings: context.sourceTruck.status === TruckStatus.INACTIVE ? ['Xe nguồn đang ngừng hoạt động'] : [] } };
+  async previewTruckTransfer(
+    sourceTruckId: string,
+    dto: TruckToTruckTransferDto,
+  ): Promise<any> {
+    const context = await this.truckTransferContext(sourceTruckId, dto);
+    const products = await this.productMapFor([
+      context.sourceTruck,
+      context.destinationTruck,
+    ]);
+    const drivers = await this.driverMapFor([
+      context.sourceTruck,
+      context.destinationTruck,
+    ]);
+    return {
+      data: {
+        sourceTruck: this.mapTruck(
+          context.sourceTruck,
+          products,
+          false,
+          drivers,
+        ),
+        destinationTruck: this.mapTruck(
+          context.destinationTruck,
+          products,
+          false,
+          drivers,
+        ),
+        items: context.snapshots,
+        totalQuantity: context.snapshots.reduce(
+          (sum, item) => sum + item.qty,
+          0,
+        ),
+        totalValue: context.snapshots.reduce(
+          (sum, item) => sum + item.totalValue,
+          0,
+        ),
+        warnings:
+          context.sourceTruck.status === TruckStatus.INACTIVE
+            ? ['Xe nguồn đang ngừng hoạt động']
+            : [],
+      },
+    };
   }
 
-  async transferBetweenTrucks(sourceTruckId: string, dto: TruckToTruckTransferDto, createdBy?: string, reversalOf?: string): Promise<any> {
-    const session = await this.connection.startSession(); let result: any;
-    try { await session.withTransaction(async () => {
-      const context = await this.truckTransferContext(sourceTruckId, dto, session); const day = this.truckTransferDay(context.date); const counter: any = await this.transferCounterModel.findOneAndUpdate({ key: `TRUCK_TO_TRUCK_${day}` }, { $inc: { sequence: 1 } }, { upsert: true, new: true, session }); const code = `CX-${day}-${String(counter.sequence).padStart(6, '0')}`;
-      for (const item of context.snapshots) {
-        const source = await this.model.updateOne({ _id: context.sourceTruck._id, inventory: { $elemMatch: { productId: item.productId, qty: { $gte: item.qty } } } }, { $inc: { 'inventory.$.qty': -item.qty } }, { session }); if (source.modifiedCount !== 1) throw new ConflictException({ code: 'SOURCE_TRUCK_INSUFFICIENT_STOCK', message: 'Tồn xe nguồn vừa thay đổi', details: { productId: item.productId } });
-        const destination = await this.model.updateOne({ _id: context.destinationTruck._id, inventory: { $elemMatch: { productId: item.productId } } }, { $inc: { 'inventory.$.qty': item.qty } }, { session }); if (destination.modifiedCount !== 1) await this.model.updateOne({ _id: context.destinationTruck._id }, { $push: { inventory: { productId: item.productId, qty: item.qty } } }, { session });
-      }
-      await this.model.updateOne({ _id: context.sourceTruck._id }, { $pull: { inventory: { qty: { $lte: 0 } } } }, { session });
-      const transfer: any = (await this.transferModel.create([{ code, type: TruckTransferType.TRUCK_TO_TRUCK, truckId: context.sourceTruck._id, truckCode: context.sourceTruck.code, truckName: context.sourceTruck.name, truckLicensePlate: context.sourceTruck.licensePlate, sourceTruckId: context.sourceTruck._id, sourceTruckCode: context.sourceTruck.code, sourceTruckName: context.sourceTruck.name, sourceTruckLicensePlate: context.sourceTruck.licensePlate, sourceDriverId: context.sourceDriver?._id, sourceDriverCode: context.sourceDriver?.employeeCode, sourceDriverName: context.sourceDriver?.fullName || context.sourceTruck.driverName, sourceDriverPhone: context.sourceDriver?.phone || context.sourceTruck.driverPhone, destinationTruckId: context.destinationTruck._id, destinationTruckCode: context.destinationTruck.code, destinationTruckName: context.destinationTruck.name, destinationTruckLicensePlate: context.destinationTruck.licensePlate, destinationDriverId: context.destinationDriver._id, destinationDriverCode: context.destinationDriver.employeeCode, destinationDriverName: context.destinationDriver.fullName || context.destinationTruck.driverName, destinationDriverPhone: context.destinationDriver.phone || context.destinationTruck.driverPhone, date: context.date, note: dto.note?.trim(), items: context.snapshots, totalQuantity: context.snapshots.reduce((sum, item) => sum + item.qty, 0), totalValue: context.snapshots.reduce((sum, item) => sum + item.totalValue, 0), createdBy: createdBy || undefined, reversalOf: reversalOf || undefined }], { session }))[0];
-      const [sourceUpdated, destinationUpdated]: any[] = await Promise.all([this.model.findById(context.sourceTruck._id).session(session).lean(), this.model.findById(context.destinationTruck._id).session(session).lean()]); const products = await this.productMapFor([sourceUpdated, destinationUpdated]); const drivers = await this.driverMapFor([sourceUpdated, destinationUpdated]); result = { data: { transfer: this.mapTransfer(transfer.toObject(), products), sourceTruck: this.mapTruck(sourceUpdated, products, false, drivers), destinationTruck: this.mapTruck(destinationUpdated, products, false, drivers) } };
-    }); return result; } finally { await session.endSession(); }
-  }
-
-  async reverseTruckTransfer(id: string, dto: ReverseTruckTransferDto, createdBy?: string): Promise<any> {
-    const original: any = await this.transferModel.findOne({ _id: id, type: TruckTransferType.TRUCK_TO_TRUCK, isDeleted: false }).lean(); if (!original) throw new NotFoundException('Không tìm thấy phiếu chuyển xe');
-    return this.transferBetweenTrucks(String(original.destinationTruckId), { destinationTruckId: String(original.sourceTruckId), date: dto.date, note: dto.note || `Đảo phiếu ${original.code}`, items: original.items.map((item) => ({ productId: String(item.productId), qty: item.qty })) }, createdBy, String(original._id));
-  }
-
-  private async moveGoods(truckId: string, dto: LoadGoodsDto, type: TruckTransferType, createdBy?: string): Promise<any> {
-    const items = this.mergedItems(dto.items); const code = this.transferCode(type, dto.code); const date = dto.date ? new Date(dto.date) : new Date();
-    if (Number.isNaN(date.getTime())) throw new BadRequestException('Ngày chứng từ không hợp lệ');
-    const session = await this.connection.startSession(); let result: any;
+  async transferBetweenTrucks(
+    sourceTruckId: string,
+    dto: TruckToTruckTransferDto,
+    createdBy?: string,
+    reversalOf?: string,
+  ): Promise<any> {
+    const session = await this.connection.startSession();
+    let result: any;
     try {
       await session.withTransaction(async () => {
-        const truck: any = await this.model.findOne({ _id: truckId, isDeleted: false }).session(session);
-        if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
-        if (type === TruckTransferType.LOAD && truck.status !== TruckStatus.ACTIVE) throw new ConflictException('Xe ngừng hoạt động không thể nhận hàng');
-        const driver: any = truck.driverId
-          ? await this.userModel.findOne({ _id: truck.driverId, isDeleted: false }).select('employeeCode fullName phone role status').session(session).lean()
-          : null;
-        if (type === TruckTransferType.LOAD && (!driver || driver.role !== RoleEnum.STAFF || driver.status !== UserStatus.ACTIVE)) {
-          throw new ConflictException('Tài xế của xe không còn hoạt động hoặc chưa được phân công, vui lòng phân công lại');
+        const context = await this.truckTransferContext(
+          sourceTruckId,
+          dto,
+          session,
+        );
+        const day = this.truckTransferDay(context.date);
+        const counter: any = await this.transferCounterModel.findOneAndUpdate(
+          { key: `TRUCK_TO_TRUCK_${day}` },
+          { $inc: { sequence: 1 } },
+          { upsert: true, new: true, session },
+        );
+        const code = `CX-${day}-${String(counter.sequence).padStart(6, '0')}`;
+        for (const item of context.snapshots) {
+          const source = await this.model.updateOne(
+            {
+              _id: context.sourceTruck._id,
+              inventory: {
+                $elemMatch: {
+                  productId: item.productId,
+                  qty: { $gte: item.qty },
+                },
+              },
+            },
+            { $inc: { 'inventory.$.qty': -item.qty } },
+            { session },
+          );
+          if (source.modifiedCount !== 1)
+            throw new ConflictException({
+              code: 'SOURCE_TRUCK_INSUFFICIENT_STOCK',
+              message: 'Tồn xe nguồn vừa thay đổi',
+              details: { productId: item.productId },
+            });
+          const destination = await this.model.updateOne(
+            {
+              _id: context.destinationTruck._id,
+              inventory: { $elemMatch: { productId: item.productId } },
+            },
+            { $inc: { 'inventory.$.qty': item.qty } },
+            { session },
+          );
+          if (destination.modifiedCount !== 1)
+            await this.model.updateOne(
+              { _id: context.destinationTruck._id },
+              {
+                $push: {
+                  inventory: { productId: item.productId, qty: item.qty },
+                },
+              },
+              { session },
+            );
         }
-        if (await this.transferModel.exists({ code }).session(session)) throw new ConflictException('Mã phiếu điều chuyển đã tồn tại');
-        const snapshots: any[] = []; const movementInputs: any[] = [];
+        // Chỉ bỏ dòng đã về đúng 0. Số âm do hóa đơn bán vượt tồn phải được giữ
+        // để lần ứng hàng sau tự cộng bù vào công nợ hàng của xe.
+        await this.model.updateOne(
+          { _id: context.sourceTruck._id },
+          { $pull: { inventory: { qty: 0 } } },
+          { session },
+        );
+        const transfer: any = (
+          await this.transferModel.create(
+            [
+              {
+                code,
+                type: TruckTransferType.TRUCK_TO_TRUCK,
+                truckId: context.sourceTruck._id,
+                truckCode: context.sourceTruck.code,
+                truckName: context.sourceTruck.name,
+                truckLicensePlate: context.sourceTruck.licensePlate,
+                sourceTruckId: context.sourceTruck._id,
+                sourceTruckCode: context.sourceTruck.code,
+                sourceTruckName: context.sourceTruck.name,
+                sourceTruckLicensePlate: context.sourceTruck.licensePlate,
+                sourceDriverId: context.sourceDriver?._id,
+                sourceDriverCode: context.sourceDriver?.employeeCode,
+                sourceDriverName:
+                  context.sourceDriver?.fullName ||
+                  context.sourceTruck.driverName,
+                sourceDriverPhone:
+                  context.sourceDriver?.phone ||
+                  context.sourceTruck.driverPhone,
+                destinationTruckId: context.destinationTruck._id,
+                destinationTruckCode: context.destinationTruck.code,
+                destinationTruckName: context.destinationTruck.name,
+                destinationTruckLicensePlate:
+                  context.destinationTruck.licensePlate,
+                destinationDriverId: context.destinationDriver._id,
+                destinationDriverCode: context.destinationDriver.employeeCode,
+                destinationDriverName:
+                  context.destinationDriver.fullName ||
+                  context.destinationTruck.driverName,
+                destinationDriverPhone:
+                  context.destinationDriver.phone ||
+                  context.destinationTruck.driverPhone,
+                date: context.date,
+                note: dto.note?.trim(),
+                items: context.snapshots,
+                totalQuantity: context.snapshots.reduce(
+                  (sum, item) => sum + item.qty,
+                  0,
+                ),
+                totalValue: context.snapshots.reduce(
+                  (sum, item) => sum + item.totalValue,
+                  0,
+                ),
+                createdBy: createdBy || undefined,
+                reversalOf: reversalOf || undefined,
+              },
+            ],
+            { session },
+          )
+        )[0];
+        const [sourceUpdated, destinationUpdated]: any[] = await Promise.all([
+          this.model.findById(context.sourceTruck._id).session(session).lean(),
+          this.model
+            .findById(context.destinationTruck._id)
+            .session(session)
+            .lean(),
+        ]);
+        const products = await this.productMapFor([
+          sourceUpdated,
+          destinationUpdated,
+        ]);
+        const drivers = await this.driverMapFor([
+          sourceUpdated,
+          destinationUpdated,
+        ]);
+        result = {
+          data: {
+            transfer: this.mapTransfer(transfer.toObject(), products),
+            sourceTruck: this.mapTruck(sourceUpdated, products, false, drivers),
+            destinationTruck: this.mapTruck(
+              destinationUpdated,
+              products,
+              false,
+              drivers,
+            ),
+          },
+        };
+      });
+      return result;
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  async reverseTruckTransfer(
+    id: string,
+    dto: ReverseTruckTransferDto,
+    createdBy?: string,
+  ): Promise<any> {
+    const original: any = await this.transferModel
+      .findOne({
+        _id: id,
+        type: TruckTransferType.TRUCK_TO_TRUCK,
+        isDeleted: false,
+      })
+      .lean();
+    if (!original)
+      throw new NotFoundException('Không tìm thấy phiếu chuyển xe');
+    return this.transferBetweenTrucks(
+      String(original.destinationTruckId),
+      {
+        destinationTruckId: String(original.sourceTruckId),
+        date: dto.date,
+        note: dto.note || `Đảo phiếu ${original.code}`,
+        items: original.items.map((item) => ({
+          productId: String(item.productId),
+          qty: item.qty,
+        })),
+      },
+      createdBy,
+      String(original._id),
+    );
+  }
+
+  private async moveGoods(
+    truckId: string,
+    dto: LoadGoodsDto,
+    type: TruckTransferType,
+    createdBy?: string,
+  ): Promise<any> {
+    const items = this.mergedItems(dto.items);
+    const code = this.transferCode(type, dto.code);
+    const date = dto.date ? new Date(dto.date) : new Date();
+    if (Number.isNaN(date.getTime()))
+      throw new BadRequestException('Ngày chứng từ không hợp lệ');
+    const session = await this.connection.startSession();
+    let result: any;
+    try {
+      await session.withTransaction(async () => {
+        const truck: any = await this.model
+          .findOne({ _id: truckId, isDeleted: false })
+          .session(session);
+        if (!truck) throw new NotFoundException('Không tìm thấy xe tải');
+        if (
+          type === TruckTransferType.LOAD &&
+          truck.status !== TruckStatus.ACTIVE
+        )
+          throw new ConflictException('Xe ngừng hoạt động không thể nhận hàng');
+        const driver: any = truck.driverId
+          ? await this.userModel
+              .findOne({ _id: truck.driverId, isDeleted: false })
+              .select('employeeCode fullName phone role status')
+              .session(session)
+              .lean()
+          : null;
+        if (
+          type === TruckTransferType.LOAD &&
+          (!driver ||
+            driver.role !== RoleEnum.STAFF ||
+            driver.status !== UserStatus.ACTIVE)
+        ) {
+          throw new ConflictException(
+            'Tài xế của xe không còn hoạt động hoặc chưa được phân công, vui lòng phân công lại',
+          );
+        }
+        if (await this.transferModel.exists({ code }).session(session))
+          throw new ConflictException('Mã phiếu điều chuyển đã tồn tại');
+        const snapshots: any[] = [];
+        const movementInputs: any[] = [];
         for (const item of items) {
           if (type === TruckTransferType.LOAD) {
             const product: any = await this.productModel.findOneAndUpdate(
-              { _id: item.productId, isDeleted: false, stock: { $gte: item.qty } },
-              { $inc: { stock: -item.qty } }, { new: false, session },
+              {
+                _id: item.productId,
+                isDeleted: false,
+                stock: { $gte: item.qty },
+              },
+              { $inc: { stock: -item.qty } },
+              { new: false, session },
             );
             if (!product) {
-              const available = await this.productModel.findById(item.productId).select('stock').session(session).lean();
-              throw new ConflictException({ code: 'INSUFFICIENT_STOCK', message: 'Số lượng tồn kho không đủ', details: { productId: item.productId, availableQuantity: available?.stock || 0, requestedQuantity: item.qty } });
+              const available = await this.productModel
+                .findById(item.productId)
+                .select('stock')
+                .session(session)
+                .lean();
+              throw new ConflictException({
+                code: 'INSUFFICIENT_STOCK',
+                message: 'Số lượng tồn kho không đủ',
+                details: {
+                  productId: item.productId,
+                  availableQuantity: available?.stock || 0,
+                  requestedQuantity: item.qty,
+                },
+              });
             }
-            const updated = await this.model.updateOne({ _id: truckId, inventory: { $elemMatch: { productId: item.productId } } }, { $inc: { 'inventory.$.qty': item.qty } }, { session });
-            if (!updated.modifiedCount) await this.model.updateOne({ _id: truckId }, { $push: { inventory: { productId: item.productId, qty: item.qty } } }, { session });
-            snapshots.push({ productId: item.productId, productCode: product.code, productName: product.name, imageUrl: product.imageUrl, unit: product.unit || '', qty: item.qty, unitCost: product.costPrice || 0, totalValue: item.qty * (product.costPrice || 0) });
-            movementInputs.push({ productId: item.productId, type: InventoryMovementType.TRANSFER_TO_TRUCK, quantityChange: -item.qty, quantityBefore: product.stock, quantityAfter: product.stock - item.qty, sourceType: InventoryLocationType.WAREHOUSE, destinationType: InventoryLocationType.TRUCK, destinationTruckId: truckId });
+            const updated = await this.model.updateOne(
+              {
+                _id: truckId,
+                inventory: { $elemMatch: { productId: item.productId } },
+              },
+              { $inc: { 'inventory.$.qty': item.qty } },
+              { session },
+            );
+            if (!updated.modifiedCount)
+              await this.model.updateOne(
+                { _id: truckId },
+                {
+                  $push: {
+                    inventory: { productId: item.productId, qty: item.qty },
+                  },
+                },
+                { session },
+              );
+            snapshots.push({
+              productId: item.productId,
+              productCode: product.code,
+              productName: product.name,
+              imageUrl: product.imageUrl,
+              unit: product.unit || '',
+              qty: item.qty,
+              unitCost: product.costPrice || 0,
+              totalValue: item.qty * (product.costPrice || 0),
+            });
+            movementInputs.push({
+              productId: item.productId,
+              type: InventoryMovementType.TRANSFER_TO_TRUCK,
+              quantityChange: -item.qty,
+              quantityBefore: product.stock,
+              quantityAfter: product.stock - item.qty,
+              sourceType: InventoryLocationType.WAREHOUSE,
+              destinationType: InventoryLocationType.TRUCK,
+              destinationTruckId: truckId,
+            });
           } else {
             const beforeTruck: any = await this.model.findOneAndUpdate(
-              { _id: truckId, inventory: { $elemMatch: { productId: item.productId, qty: { $gte: item.qty } } } },
-              { $inc: { 'inventory.$.qty': -item.qty } }, { new: false, session },
+              {
+                _id: truckId,
+                inventory: {
+                  $elemMatch: {
+                    productId: item.productId,
+                    qty: { $gte: item.qty },
+                  },
+                },
+              },
+              { $inc: { 'inventory.$.qty': -item.qty } },
+              { new: false, session },
             );
             if (!beforeTruck) {
-              const current: any = await this.model.findById(truckId).session(session).lean(); const available = current?.inventory?.find((entry) => String(entry.productId) === item.productId)?.qty || 0;
-              throw new ConflictException({ code: 'INSUFFICIENT_TRUCK_STOCK', message: 'Số lượng hàng trên xe không đủ', details: { truckId, productId: item.productId, availableQuantity: available, requestedQuantity: item.qty } });
+              const current: any = await this.model
+                .findById(truckId)
+                .session(session)
+                .lean();
+              const available =
+                current?.inventory?.find(
+                  (entry) => String(entry.productId) === item.productId,
+                )?.qty || 0;
+              throw new ConflictException({
+                code: 'INSUFFICIENT_TRUCK_STOCK',
+                message: 'Số lượng hàng trên xe không đủ',
+                details: {
+                  truckId,
+                  productId: item.productId,
+                  availableQuantity: available,
+                  requestedQuantity: item.qty,
+                },
+              });
             }
-            const product: any = await this.productModel.findOneAndUpdate({ _id: item.productId, isDeleted: false }, { $inc: { stock: item.qty } }, { new: false, session });
-            if (!product) throw new BadRequestException(`Sản phẩm ${item.productId} không tồn tại`);
-            snapshots.push({ productId: item.productId, productCode: product.code, productName: product.name, imageUrl: product.imageUrl, unit: product.unit || '', qty: item.qty, unitCost: product.costPrice || 0, totalValue: item.qty * (product.costPrice || 0) });
-            movementInputs.push({ productId: item.productId, type: InventoryMovementType.RETURN_FROM_TRUCK, quantityChange: item.qty, quantityBefore: product.stock, quantityAfter: product.stock + item.qty, sourceType: InventoryLocationType.TRUCK, sourceTruckId: truckId, destinationType: InventoryLocationType.WAREHOUSE });
+            const product: any = await this.productModel.findOneAndUpdate(
+              { _id: item.productId, isDeleted: false },
+              { $inc: { stock: item.qty } },
+              { new: false, session },
+            );
+            if (!product)
+              throw new BadRequestException(
+                `Sản phẩm ${item.productId} không tồn tại`,
+              );
+            snapshots.push({
+              productId: item.productId,
+              productCode: product.code,
+              productName: product.name,
+              imageUrl: product.imageUrl,
+              unit: product.unit || '',
+              qty: item.qty,
+              unitCost: product.costPrice || 0,
+              totalValue: item.qty * (product.costPrice || 0),
+            });
+            movementInputs.push({
+              productId: item.productId,
+              type: InventoryMovementType.RETURN_FROM_TRUCK,
+              quantityChange: item.qty,
+              quantityBefore: product.stock,
+              quantityAfter: product.stock + item.qty,
+              sourceType: InventoryLocationType.TRUCK,
+              sourceTruckId: truckId,
+              destinationType: InventoryLocationType.WAREHOUSE,
+            });
           }
         }
-        if (type === TruckTransferType.RETURN) await this.model.updateOne({ _id: truckId }, { $pull: { inventory: { qty: { $lte: 0 } } } }, { session });
-        const totalQuantity = snapshots.reduce((sum, item) => sum + item.qty, 0); const totalValue = snapshots.reduce((sum, item) => sum + item.qty * item.unitCost, 0);
-        const transfer: any = (await this.transferModel.create([{
-          code, type, truckId, truckCode: truck.code, truckName: truck.name, truckLicensePlate: truck.licensePlate,
-          driverId: truck.driverId || undefined,
-          driverCode: driver?.employeeCode,
-          driverName: truck.driverName || driver?.fullName || truck.driver,
-          driverPhone: truck.driverPhone || driver?.phone || truck.phone,
-          date, note: dto.note, items: snapshots, totalQuantity, totalValue, createdBy: createdBy || undefined,
-        }], { session }))[0];
-        await this.movements.recordMany(movementInputs.map((movement) => ({ ...movement, referenceType: type === TruckTransferType.LOAD ? 'TRUCK_LOAD' : 'TRUCK_RETURN', referenceId: String(transfer._id), referenceCode: code })), session);
-        const updatedTruck: any = await this.model.findById(truckId).session(session).lean(); const products = await this.productMapFor([updatedTruck]);
-        result = { data: { transfer: this.mapTransfer(transfer.toObject(), products), truck: this.mapTruck(updatedTruck, products) } };
+        if (type === TruckTransferType.RETURN)
+          await this.model.updateOne(
+            { _id: truckId },
+            { $pull: { inventory: { qty: 0 } } },
+            { session },
+          );
+        const totalQuantity = snapshots.reduce(
+          (sum, item) => sum + item.qty,
+          0,
+        );
+        const totalValue = snapshots.reduce(
+          (sum, item) => sum + item.qty * item.unitCost,
+          0,
+        );
+        const transfer: any = (
+          await this.transferModel.create(
+            [
+              {
+                code,
+                type,
+                truckId,
+                truckCode: truck.code,
+                truckName: truck.name,
+                truckLicensePlate: truck.licensePlate,
+                driverId: truck.driverId || undefined,
+                driverCode: driver?.employeeCode,
+                driverName:
+                  truck.driverName || driver?.fullName || truck.driver,
+                driverPhone: truck.driverPhone || driver?.phone || truck.phone,
+                date,
+                note: dto.note,
+                items: snapshots,
+                totalQuantity,
+                totalValue,
+                createdBy: createdBy || undefined,
+              },
+            ],
+            { session },
+          )
+        )[0];
+        await this.movements.recordMany(
+          movementInputs.map((movement) => ({
+            ...movement,
+            referenceType:
+              type === TruckTransferType.LOAD ? 'TRUCK_LOAD' : 'TRUCK_RETURN',
+            referenceId: String(transfer._id),
+            referenceCode: code,
+          })),
+          session,
+        );
+        const updatedTruck: any = await this.model
+          .findById(truckId)
+          .session(session)
+          .lean();
+        const products = await this.productMapFor([updatedTruck]);
+        result = {
+          data: {
+            transfer: this.mapTransfer(transfer.toObject(), products),
+            truck: this.mapTruck(updatedTruck, products),
+          },
+        };
       });
       return result;
-    } finally { await session.endSession(); }
+    } finally {
+      await session.endSession();
+    }
   }
 
-  private async transferProductMap(transfers: any[]): Promise<Map<string, any>> {
-    const ids = [...new Set(transfers.flatMap((transfer) => (transfer.items || []).map((item: any) => String(item.productId || '')).filter((id: string) => Types.ObjectId.isValid(id))))];
-    const products: any[] = ids.length ? await this.productModel.find({ _id: { $in: ids } }).select('imageUrl').lean() : [];
+  private async transferProductMap(
+    transfers: any[],
+  ): Promise<Map<string, any>> {
+    const ids = [
+      ...new Set(
+        transfers.flatMap((transfer) =>
+          (transfer.items || [])
+            .map((item: any) => String(item.productId || ''))
+            .filter((id: string) => Types.ObjectId.isValid(id)),
+        ),
+      ),
+    ];
+    const products: any[] = ids.length
+      ? await this.productModel
+          .find({ _id: { $in: ids } })
+          .select('imageUrl')
+          .lean()
+      : [];
     const withImages = await this.withProductImages(products);
-    return new Map<string, any>(withImages.map((product: any) => [String(product._id), product] as [string, any]));
+    return new Map<string, any>(
+      withImages.map(
+        (product: any) => [String(product._id), product] as [string, any],
+      ),
+    );
   }
 
   private mapTransfer(transfer: any, products: Map<string, any> = new Map()) {
     const creator = transfer.createdBy;
-    const truckSnapshot = (prefix: 'source' | 'destination') => transfer[`${prefix}TruckId`] ? { id: String(transfer[`${prefix}TruckId`]), code: transfer[`${prefix}TruckCode`], name: transfer[`${prefix}TruckName`], licensePlate: transfer[`${prefix}TruckLicensePlate`], driver: transfer[`${prefix}DriverId`] || transfer[`${prefix}DriverName`] ? { id: transfer[`${prefix}DriverId`] ? String(transfer[`${prefix}DriverId`]) : null, employeeCode: transfer[`${prefix}DriverCode`], fullName: transfer[`${prefix}DriverName`], phone: transfer[`${prefix}DriverPhone`] } : null } : null;
-    return { id: String(transfer._id), code: transfer.code, type: transfer.type, date: transfer.date, truck: { id: String(transfer.truckId), code: transfer.truckCode, name: transfer.truckName, licensePlate: transfer.truckLicensePlate }, sourceTruck: truckSnapshot('source'), destinationTruck: truckSnapshot('destination'), driver: transfer.driverId || transfer.driverName ? { id: transfer.driverId ? String(transfer.driverId) : null, employeeCode: transfer.driverCode, fullName: transfer.driverName, phone: transfer.driverPhone } : null, totalQuantity: transfer.totalQuantity, totalValue: transfer.totalValue, note: transfer.note, reversalOf: transfer.reversalOf ? String(transfer.reversalOf) : null, items: (transfer.items || []).map((item) => ({ productId: String(item.productId), productCode: item.productCode, productName: item.productName, imageUrl: products.get(String(item.productId))?.imageUrl || item.imageUrl, unit: item.unit || '', qty: item.qty, unitCost: item.unitCost, stockValue: item.totalValue ?? item.qty * item.unitCost })), createdBy: creator ? { id: String(creator._id || creator), fullName: creator.fullName || creator.username } : null, createdAt: transfer.createdAt };
+    const truckSnapshot = (prefix: 'source' | 'destination') =>
+      transfer[`${prefix}TruckId`]
+        ? {
+            id: String(transfer[`${prefix}TruckId`]),
+            code: transfer[`${prefix}TruckCode`],
+            name: transfer[`${prefix}TruckName`],
+            licensePlate: transfer[`${prefix}TruckLicensePlate`],
+            driver:
+              transfer[`${prefix}DriverId`] || transfer[`${prefix}DriverName`]
+                ? {
+                    id: transfer[`${prefix}DriverId`]
+                      ? String(transfer[`${prefix}DriverId`])
+                      : null,
+                    employeeCode: transfer[`${prefix}DriverCode`],
+                    fullName: transfer[`${prefix}DriverName`],
+                    phone: transfer[`${prefix}DriverPhone`],
+                  }
+                : null,
+          }
+        : null;
+    return {
+      id: String(transfer._id),
+      code: transfer.code,
+      type: transfer.type,
+      date: transfer.date,
+      truck: {
+        id: String(transfer.truckId),
+        code: transfer.truckCode,
+        name: transfer.truckName,
+        licensePlate: transfer.truckLicensePlate,
+      },
+      sourceTruck: truckSnapshot('source'),
+      destinationTruck: truckSnapshot('destination'),
+      driver:
+        transfer.driverId || transfer.driverName
+          ? {
+              id: transfer.driverId ? String(transfer.driverId) : null,
+              employeeCode: transfer.driverCode,
+              fullName: transfer.driverName,
+              phone: transfer.driverPhone,
+            }
+          : null,
+      totalQuantity: transfer.totalQuantity,
+      totalValue: transfer.totalValue,
+      note: transfer.note,
+      reversalOf: transfer.reversalOf ? String(transfer.reversalOf) : null,
+      items: (transfer.items || []).map((item) => ({
+        productId: String(item.productId),
+        productCode: item.productCode,
+        productName: item.productName,
+        imageUrl:
+          products.get(String(item.productId))?.imageUrl || item.imageUrl,
+        unit: item.unit || '',
+        qty: item.qty,
+        unitCost: item.unitCost,
+        stockValue: item.totalValue ?? item.qty * item.unitCost,
+      })),
+      createdBy: creator
+        ? {
+            id: String(creator._id || creator),
+            fullName: creator.fullName || creator.username,
+          }
+        : null,
+      createdAt: transfer.createdAt,
+    };
   }
 
   private transferFilter(query: TruckTransferQueryDto) {
     const filter: any = { isDeleted: false };
     const expressions: any[] = [];
-    if (query.truckId) { if (!Types.ObjectId.isValid(query.truckId)) throw new BadRequestException('truckId không hợp lệ'); expressions.push({ $or: [{ truckId: query.truckId }, { sourceTruckId: query.truckId }, { destinationTruckId: query.truckId }] }); }
-    if (query.sourceTruckId) expressions.push({ sourceTruckId: query.sourceTruckId });
-    if (query.destinationTruckId) expressions.push({ destinationTruckId: query.destinationTruckId });
+    if (query.truckId) {
+      if (!Types.ObjectId.isValid(query.truckId))
+        throw new BadRequestException('truckId không hợp lệ');
+      expressions.push({
+        $or: [
+          { truckId: query.truckId },
+          { sourceTruckId: query.truckId },
+          { destinationTruckId: query.truckId },
+        ],
+      });
+    }
+    if (query.sourceTruckId)
+      expressions.push({ sourceTruckId: query.sourceTruckId });
+    if (query.destinationTruckId)
+      expressions.push({ destinationTruckId: query.destinationTruckId });
     if (query.type) filter.type = query.type;
     if (query.search?.trim()) {
-      const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      expressions.push({ $or: ['code', 'truckCode', 'truckName', 'sourceTruckCode', 'sourceTruckName', 'sourceTruckLicensePlate', 'sourceDriverName', 'destinationTruckCode', 'destinationTruckName', 'destinationTruckLicensePlate', 'destinationDriverName', 'items.productCode', 'items.productName'].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } })) });
+      const escaped = query.search
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      expressions.push({
+        $or: [
+          'code',
+          'truckCode',
+          'truckName',
+          'sourceTruckCode',
+          'sourceTruckName',
+          'sourceTruckLicensePlate',
+          'sourceDriverName',
+          'destinationTruckCode',
+          'destinationTruckName',
+          'destinationTruckLicensePlate',
+          'destinationDriverName',
+          'items.productCode',
+          'items.productName',
+        ].map((field) => ({ [field]: { $regex: escaped, $options: 'i' } })),
+      });
     }
     if (query.from || query.to) {
       filter.date = {};
       if (query.from) filter.date.$gte = vietnamDateBoundary(query.from, false);
       if (query.to) filter.date.$lte = vietnamDateBoundary(query.to, true);
-      if (filter.date.$gte && filter.date.$lte && filter.date.$gte > filter.date.$lte) throw new BadRequestException('Ngày bắt đầu phải trước ngày kết thúc');
+      if (
+        filter.date.$gte &&
+        filter.date.$lte &&
+        filter.date.$gte > filter.date.$lte
+      )
+        throw new BadRequestException('Ngày bắt đầu phải trước ngày kết thúc');
     }
     if (expressions.length) filter.$and = expressions;
     return filter;
   }
 
   async findTransfers(query: TruckTransferQueryDto): Promise<any> {
-    const page = this.positiveInt(query.page, 1); const limit = this.positiveInt(query.limit, 20, 100); const filter = this.transferFilter(query);
-    const [transfers, totalItems] = await Promise.all([this.transferModel.find(filter).sort({ date: -1, createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).populate('createdBy', 'fullName username').lean(), this.transferModel.countDocuments(filter)]);
+    const page = this.positiveInt(query.page, 1);
+    const limit = this.positiveInt(query.limit, 20, 100);
+    const filter = this.transferFilter(query);
+    const [transfers, totalItems] = await Promise.all([
+      this.transferModel
+        .find(filter)
+        .sort({ date: -1, createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('createdBy', 'fullName username')
+        .lean(),
+      this.transferModel.countDocuments(filter),
+    ]);
     const products = await this.transferProductMap(transfers);
-    return { data: transfers.map((transfer) => this.mapTransfer(transfer, products)), meta: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+    return {
+      data: transfers.map((transfer) => this.mapTransfer(transfer, products)),
+      meta: {
+        page,
+        limit,
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+      },
+    };
   }
 
   async findTransfer(id: string) {
-    const transfer = await this.transferModel.findOne({ _id: id, isDeleted: false }).populate('createdBy', 'fullName username').lean();
-    if (!transfer) throw new NotFoundException('Không tìm thấy phiếu điều chuyển');
+    const transfer = await this.transferModel
+      .findOne({ _id: id, isDeleted: false })
+      .populate('createdBy', 'fullName username')
+      .lean();
+    if (!transfer)
+      throw new NotFoundException('Không tìm thấy phiếu điều chuyển');
     const products = await this.transferProductMap([transfer]);
     return { data: this.mapTransfer(transfer, products) };
   }
 
   async transferSummary(query: TruckTransferQueryDto) {
-    const transfers: any[] = await this.transferModel.find(this.transferFilter(query)).select('type truckId sourceTruckId destinationTruckId items totalQuantity totalValue').lean();
-    const truckIds = new Set<string>(); const productIds = new Set<string>();
-    let totalQuantity = 0; let totalValue = 0;
+    const transfers: any[] = await this.transferModel
+      .find(this.transferFilter(query))
+      .select(
+        'type truckId sourceTruckId destinationTruckId items totalQuantity totalValue',
+      )
+      .lean();
+    const truckIds = new Set<string>();
+    const productIds = new Set<string>();
+    let totalQuantity = 0;
+    let totalValue = 0;
     for (const transfer of transfers) {
-      if (transfer.truckId) truckIds.add(String(transfer.truckId)); if (transfer.sourceTruckId) truckIds.add(String(transfer.sourceTruckId)); if (transfer.destinationTruckId) truckIds.add(String(transfer.destinationTruckId)); totalQuantity += transfer.totalQuantity || 0; totalValue += transfer.totalValue || 0;
-      for (const item of transfer.items || []) productIds.add(String(item.productId));
+      if (transfer.truckId) truckIds.add(String(transfer.truckId));
+      if (transfer.sourceTruckId) truckIds.add(String(transfer.sourceTruckId));
+      if (transfer.destinationTruckId)
+        truckIds.add(String(transfer.destinationTruckId));
+      totalQuantity += transfer.totalQuantity || 0;
+      totalValue += transfer.totalValue || 0;
+      for (const item of transfer.items || [])
+        productIds.add(String(item.productId));
     }
-    const truckToTruck = transfers.filter((transfer) => transfer.type === TruckTransferType.TRUCK_TO_TRUCK);
-    return { data: { totalTransfers: transfers.length, totalQuantity, totalValue, truckCount: truckIds.size, productCount: productIds.size, truckToTruckTransfers: truckToTruck.length, truckToTruckQuantity: truckToTruck.reduce((sum, transfer) => sum + (transfer.totalQuantity || 0), 0), truckToTruckValue: truckToTruck.reduce((sum, transfer) => sum + (transfer.totalValue || 0), 0) } };
+    const truckToTruck = transfers.filter(
+      (transfer) => transfer.type === TruckTransferType.TRUCK_TO_TRUCK,
+    );
+    return {
+      data: {
+        totalTransfers: transfers.length,
+        totalQuantity,
+        totalValue,
+        truckCount: truckIds.size,
+        productCount: productIds.size,
+        truckToTruckTransfers: truckToTruck.length,
+        truckToTruckQuantity: truckToTruck.reduce(
+          (sum, transfer) => sum + (transfer.totalQuantity || 0),
+          0,
+        ),
+        truckToTruckValue: truckToTruck.reduce(
+          (sum, transfer) => sum + (transfer.totalValue || 0),
+          0,
+        ),
+      },
+    };
   }
 
   async exportTransfers(query: TruckTransferQueryDto): Promise<Buffer> {
-    const transfers: any[] = await this.transferModel.find(this.transferFilter(query)).sort({ date: -1, createdAt: -1, _id: -1 }).populate('createdBy', 'fullName username').lean();
-    const workbook = new ExcelJS.Workbook(); const sheet = workbook.addWorksheet('Phieu dieu chuyen');
+    const transfers: any[] = await this.transferModel
+      .find(this.transferFilter(query))
+      .sort({ date: -1, createdAt: -1, _id: -1 })
+      .populate('createdBy', 'fullName username')
+      .lean();
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Phieu dieu chuyen');
     sheet.columns = [
-      { header: 'Mã phiếu', key: 'code', width: 20 }, { header: 'Loại phiếu', key: 'type', width: 14 },
-      { header: 'Ngày', key: 'date', width: 22 }, { header: 'Mã xe', key: 'truckCode', width: 14 },
-      { header: 'Tên xe', key: 'truckName', width: 24 }, { header: 'Biển số', key: 'licensePlate', width: 18 },
-      { header: 'Mã tài xế', key: 'driverCode', width: 16 }, { header: 'Tên tài xế', key: 'driverName', width: 26 },
-      { header: 'Xe nguồn', key: 'sourceTruck', width: 26 }, { header: 'Biển số xe nguồn', key: 'sourcePlate', width: 18 },
-      { header: 'Tài xế giao', key: 'sourceDriver', width: 26 }, { header: 'Xe nhận', key: 'destinationTruck', width: 26 },
-      { header: 'Biển số xe nhận', key: 'destinationPlate', width: 18 }, { header: 'Tài xế nhận', key: 'destinationDriver', width: 26 },
-      { header: 'Mã sản phẩm', key: 'productCode', width: 18 }, { header: 'Tên sản phẩm', key: 'productName', width: 30 },
-      { header: 'Đơn vị', key: 'unit', width: 12 }, { header: 'Số lượng', key: 'qty', width: 14 },
-      { header: 'Giá vốn', key: 'unitCost', width: 16 }, { header: 'Thành tiền', key: 'stockValue', width: 18 },
-      { header: 'Người tạo', key: 'createdBy', width: 24 }, { header: 'Ghi chú', key: 'note', width: 32 },
+      { header: 'Mã phiếu', key: 'code', width: 20 },
+      { header: 'Loại phiếu', key: 'type', width: 14 },
+      { header: 'Ngày', key: 'date', width: 22 },
+      { header: 'Mã xe', key: 'truckCode', width: 14 },
+      { header: 'Tên xe', key: 'truckName', width: 24 },
+      { header: 'Biển số', key: 'licensePlate', width: 18 },
+      { header: 'Mã tài xế', key: 'driverCode', width: 16 },
+      { header: 'Tên tài xế', key: 'driverName', width: 26 },
+      { header: 'Xe nguồn', key: 'sourceTruck', width: 26 },
+      { header: 'Biển số xe nguồn', key: 'sourcePlate', width: 18 },
+      { header: 'Tài xế giao', key: 'sourceDriver', width: 26 },
+      { header: 'Xe nhận', key: 'destinationTruck', width: 26 },
+      { header: 'Biển số xe nhận', key: 'destinationPlate', width: 18 },
+      { header: 'Tài xế nhận', key: 'destinationDriver', width: 26 },
+      { header: 'Mã sản phẩm', key: 'productCode', width: 18 },
+      { header: 'Tên sản phẩm', key: 'productName', width: 30 },
+      { header: 'Đơn vị', key: 'unit', width: 12 },
+      { header: 'Số lượng', key: 'qty', width: 14 },
+      { header: 'Giá vốn', key: 'unitCost', width: 16 },
+      { header: 'Thành tiền', key: 'stockValue', width: 18 },
+      { header: 'Người tạo', key: 'createdBy', width: 24 },
+      { header: 'Ghi chú', key: 'note', width: 32 },
     ];
     for (const transfer of transfers) {
-      for (const item of transfer.items || []) sheet.addRow({
-        code: transfer.code, type: transfer.type, date: transfer.date, truckCode: transfer.truckCode, truckName: transfer.truckName,
-        licensePlate: transfer.truckLicensePlate || '', driverCode: transfer.driverCode || '', driverName: transfer.driverName || '',
-        sourceTruck: [transfer.sourceTruckCode, transfer.sourceTruckName].filter(Boolean).join(' - '), sourcePlate: transfer.sourceTruckLicensePlate || '', sourceDriver: transfer.sourceDriverName || '',
-        destinationTruck: [transfer.destinationTruckCode, transfer.destinationTruckName].filter(Boolean).join(' - '), destinationPlate: transfer.destinationTruckLicensePlate || '', destinationDriver: transfer.destinationDriverName || '',
-        productCode: item.productCode, productName: item.productName, unit: item.unit || '', qty: item.qty, unitCost: item.unitCost,
-        stockValue: item.qty * item.unitCost, createdBy: transfer.createdBy?.fullName || transfer.createdBy?.username || '', note: transfer.note || '',
-      });
+      for (const item of transfer.items || [])
+        sheet.addRow({
+          code: transfer.code,
+          type: transfer.type,
+          date: transfer.date,
+          truckCode: transfer.truckCode,
+          truckName: transfer.truckName,
+          licensePlate: transfer.truckLicensePlate || '',
+          driverCode: transfer.driverCode || '',
+          driverName: transfer.driverName || '',
+          sourceTruck: [transfer.sourceTruckCode, transfer.sourceTruckName]
+            .filter(Boolean)
+            .join(' - '),
+          sourcePlate: transfer.sourceTruckLicensePlate || '',
+          sourceDriver: transfer.sourceDriverName || '',
+          destinationTruck: [
+            transfer.destinationTruckCode,
+            transfer.destinationTruckName,
+          ]
+            .filter(Boolean)
+            .join(' - '),
+          destinationPlate: transfer.destinationTruckLicensePlate || '',
+          destinationDriver: transfer.destinationDriverName || '',
+          productCode: item.productCode,
+          productName: item.productName,
+          unit: item.unit || '',
+          qty: item.qty,
+          unitCost: item.unitCost,
+          stockValue: item.qty * item.unitCost,
+          createdBy:
+            transfer.createdBy?.fullName || transfer.createdBy?.username || '',
+          note: transfer.note || '',
+        });
     }
-    sheet.getRow(1).font = { bold: true }; sheet.views = [{ state: 'frozen', ySplit: 1 }]; sheet.autoFilter = { from: 'A1', to: 'V1' };
-    sheet.getColumn('date').numFmt = 'dd/mm/yyyy hh:mm'; ['qty', 'unitCost', 'stockValue'].forEach((column) => { sheet.getColumn(column).numFmt = '#,##0'; });
+    sheet.getRow(1).font = { bold: true };
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = { from: 'A1', to: 'V1' };
+    sheet.getColumn('date').numFmt = 'dd/mm/yyyy hh:mm';
+    ['qty', 'unitCost', 'stockValue'].forEach((column) => {
+      sheet.getColumn(column).numFmt = '#,##0';
+    });
     return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
-  async goodsReport(truckId: string, query: TruckGoodsReportQueryDto): Promise<any> {
-    const truck: any = await this.model.findOne({ _id: truckId, isDeleted: false }).select('code name licensePlate').lean();
+  async goodsReport(
+    truckId: string,
+    query: TruckGoodsReportQueryDto,
+  ): Promise<any> {
+    const truck: any = await this.model
+      .findOne({ _id: truckId, isDeleted: false })
+      .select('code name licensePlate')
+      .lean();
     if (!truck) throw new NotFoundException('Không tìm thấy xe');
-    const from = query.from ? vietnamDateBoundary(query.from, false) : new Date(0), to = query.to ? vietnamDateBoundary(query.to, true) : new Date();
-    if (from > to) throw new BadRequestException('Ngày bắt đầu phải trước ngày kết thúc');
-    const movementTypes = [InventoryMovementType.TRUCK_SALE, InventoryMovementType.INVOICE_GIFT_FROM_TRUCK, InventoryMovementType.PROMOTION_GIFT_FROM_TRUCK, InventoryMovementType.INVOICE_REVERSAL_TO_TRUCK, InventoryMovementType.CUSTOMER_RETURN_TO_TRUCK, InventoryMovementType.CUSTOMER_RETURN_REVERSED];
+    const from = query.from
+        ? vietnamDateBoundary(query.from, false)
+        : new Date(0),
+      to = query.to ? vietnamDateBoundary(query.to, true) : new Date();
+    if (from > to)
+      throw new BadRequestException('Ngày bắt đầu phải trước ngày kết thúc');
+    const movementTypes = [
+      InventoryMovementType.TRUCK_SALE,
+      InventoryMovementType.INVOICE_GIFT_FROM_TRUCK,
+      InventoryMovementType.PROMOTION_GIFT_FROM_TRUCK,
+      InventoryMovementType.INVOICE_REVERSAL_TO_TRUCK,
+      InventoryMovementType.CUSTOMER_RETURN_TO_TRUCK,
+      InventoryMovementType.CUSTOMER_RETURN_REVERSED,
+    ];
     const [movements, invoices, manualReturns]: any[][] = await Promise.all([
-      this.movementModel.find({ isDeleted: false, type: { $in: movementTypes }, createdAt: { $gte: from, $lte: to }, $or: [{ sourceTruckId: truckId }, { destinationTruckId: truckId }] }).sort({ createdAt: 1, _id: 1 }).lean(),
-      this.invoiceModel.find({ isDeleted: { $ne: true }, status: { $ne: InvoiceStatus.REVERSED }, sourceType: 'truck', truckId, date: { $gte: from, $lte: to } }).select('_id code items').lean(),
-      this.customerReturnModel.find({ isDeleted: false, destinationTruckId: truckId, $or: [{ createdAt: { $gte: from, $lte: to } }, { reversedAt: { $gte: from, $lte: to } }] }).select('code status createdAt reversedAt items').lean(),
+      this.movementModel
+        .find({
+          isDeleted: false,
+          type: { $in: movementTypes },
+          createdAt: { $gte: from, $lte: to },
+          $or: [{ sourceTruckId: truckId }, { destinationTruckId: truckId }],
+        })
+        .sort({ createdAt: 1, _id: 1 })
+        .lean(),
+      this.invoiceModel
+        .find({
+          isDeleted: { $ne: true },
+          status: { $ne: InvoiceStatus.REVERSED },
+          sourceType: 'truck',
+          truckId,
+          date: { $gte: from, $lte: to },
+        })
+        .select('_id code items')
+        .lean(),
+      this.customerReturnModel
+        .find({
+          isDeleted: false,
+          destinationTruckId: truckId,
+          $or: [
+            { createdAt: { $gte: from, $lte: to } },
+            { reversedAt: { $gte: from, $lte: to } },
+          ],
+        })
+        .select('code status createdAt reversedAt items')
+        .lean(),
     ]);
-    const productIds = [...new Set(movements.map((x) => String(x.productId)))]; const products: any[] = productIds.length ? await this.productModel.find({ _id: { $in: productIds } }).select('code name unit').lean() : []; const productMap = new Map(products.map((x) => [String(x._id), x]));
-    const groups = new Map<string, any>(), allDocumentKeys = new Set<string>(); const group = (key:string, meta:any) => { if(!groups.has(key))groups.set(key,{ productId:meta.productId,code:meta.code||'',name:meta.name||'Sản phẩm',unit:meta.unit||'',documentKeys:new Set<string>(),soldQuantity:0,giftQuantity:0,invoiceReturnQuantity:0,customerReturnQuantity:0,returnReversedQuantity:0,revenue:0,openingQuantity:null,closingQuantity:null }); return groups.get(key); };
-    const invoiceMap = new Map<string, any>(); for(const invoice of invoices) { invoiceMap.set(String(invoice._id),invoice); invoiceMap.set(String(invoice.code),invoice); }
-    for(const movement of movements){const p:any=productMap.get(String(movement.productId))||{};const row=group(String(movement.productId),{productId:String(movement.productId),...p});if(row.openingQuantity===null)row.openingQuantity=Number(movement.quantityBefore);row.closingQuantity=Number(movement.quantityAfter);const qty=Math.abs(Number(movement.quantityChange||movement.returnQuantity||0));const reference=String(movement.referenceId||movement.referenceCode||movement._id);row.documentKeys.add(reference);allDocumentKeys.add(reference);if(movement.type===InventoryMovementType.TRUCK_SALE){row.soldQuantity+=qty;const invoice=invoiceMap.get(String(movement.referenceId))||invoiceMap.get(String(movement.referenceCode));const item=invoice?.items?.find((x:any)=>String(x.productId)===String(movement.productId)&&x.lineType!==InvoiceLineType.GIFT);row.revenue+=Number(item?.lineTotal||0);}else if([InventoryMovementType.INVOICE_GIFT_FROM_TRUCK,InventoryMovementType.PROMOTION_GIFT_FROM_TRUCK].includes(movement.type))row.giftQuantity+=qty;else if(movement.type===InventoryMovementType.INVOICE_REVERSAL_TO_TRUCK)row.invoiceReturnQuantity+=qty;else if(movement.type===InventoryMovementType.CUSTOMER_RETURN_TO_TRUCK)row.customerReturnQuantity+=qty;else if(movement.type===InventoryMovementType.CUSTOMER_RETURN_REVERSED)row.returnReversedQuantity+=qty;}
-    for(const ret of manualReturns){for(const item of ret.items||[]){if(item.itemType!==ReturnItemType.MANUAL)continue;const key=`manual:${String(item.manualCode||item.manualName).toLocaleLowerCase('vi')}`,row=group(key,{code:item.manualCode,name:item.manualName,unit:item.manualUnit});if(ret.createdAt>=from&&ret.createdAt<=to){row.customerReturnQuantity+=Number(item.qty||0);row.documentKeys.add(`return:${ret.code}`);allDocumentKeys.add(`return:${ret.code}`);}if(ret.status==='REVERSED'&&ret.reversedAt>=from&&ret.reversedAt<=to){row.returnReversedQuantity+=Number(item.qty||0);row.documentKeys.add(`reverse:${ret.code}`);allDocumentKeys.add(`reverse:${ret.code}`);}}}
-    const data=[...groups.values()].map((row:any)=>{const inboundQuantity=row.invoiceReturnQuantity+row.customerReturnQuantity,outboundQuantity=row.soldQuantity+row.giftQuantity+row.returnReversedQuantity;const{documentKeys,...plain}=row;return{...plain,documentCount:documentKeys.size,inboundQuantity,outboundQuantity,netQuantity:inboundQuantity-outboundQuantity};}).sort((a,b)=>b.outboundQuantity-a.outboundQuantity||a.name.localeCompare(b.name,'vi'));
-    const summary=data.reduce((s,x)=>({documentCount:allDocumentKeys.size,soldQuantity:s.soldQuantity+x.soldQuantity,giftQuantity:s.giftQuantity+x.giftQuantity,invoiceReturnQuantity:s.invoiceReturnQuantity+x.invoiceReturnQuantity,customerReturnQuantity:s.customerReturnQuantity+x.customerReturnQuantity,returnReversedQuantity:s.returnReversedQuantity+x.returnReversedQuantity,inboundQuantity:s.inboundQuantity+x.inboundQuantity,outboundQuantity:s.outboundQuantity+x.outboundQuantity,netQuantity:s.netQuantity+x.netQuantity,revenue:s.revenue+x.revenue}),{documentCount:allDocumentKeys.size,soldQuantity:0,giftQuantity:0,invoiceReturnQuantity:0,customerReturnQuantity:0,returnReversedQuantity:0,inboundQuantity:0,outboundQuantity:0,netQuantity:0,revenue:0});
-    return {data:{truck:{id:String(truck._id),code:truck.code,name:truck.name,licensePlate:truck.licensePlate},period:{from,to,timezone:'Asia/Ho_Chi_Minh'},summary,data}};
+    const productIds = [...new Set(movements.map((x) => String(x.productId)))];
+    const products: any[] = productIds.length
+      ? await this.productModel
+          .find({ _id: { $in: productIds } })
+          .select('code name unit')
+          .lean()
+      : [];
+    const productMap = new Map(products.map((x) => [String(x._id), x]));
+    const groups = new Map<string, any>(),
+      allDocumentKeys = new Set<string>();
+    const group = (key: string, meta: any) => {
+      if (!groups.has(key))
+        groups.set(key, {
+          productId: meta.productId,
+          code: meta.code || '',
+          name: meta.name || 'Sản phẩm',
+          unit: meta.unit || '',
+          documentKeys: new Set<string>(),
+          soldQuantity: 0,
+          giftQuantity: 0,
+          invoiceReturnQuantity: 0,
+          customerReturnQuantity: 0,
+          returnReversedQuantity: 0,
+          revenue: 0,
+          openingQuantity: null,
+          closingQuantity: null,
+        });
+      return groups.get(key);
+    };
+    const invoiceMap = new Map<string, any>();
+    for (const invoice of invoices) {
+      invoiceMap.set(String(invoice._id), invoice);
+      invoiceMap.set(String(invoice.code), invoice);
+    }
+    for (const movement of movements) {
+      const p: any = productMap.get(String(movement.productId)) || {};
+      const row = group(String(movement.productId), {
+        productId: String(movement.productId),
+        ...p,
+      });
+      if (row.openingQuantity === null)
+        row.openingQuantity = Number(movement.quantityBefore);
+      row.closingQuantity = Number(movement.quantityAfter);
+      const qty = Math.abs(
+        Number(movement.quantityChange || movement.returnQuantity || 0),
+      );
+      const reference = String(
+        movement.referenceId || movement.referenceCode || movement._id,
+      );
+      row.documentKeys.add(reference);
+      allDocumentKeys.add(reference);
+      if (movement.type === InventoryMovementType.TRUCK_SALE) {
+        row.soldQuantity += qty;
+        const invoice =
+          invoiceMap.get(String(movement.referenceId)) ||
+          invoiceMap.get(String(movement.referenceCode));
+        const item = invoice?.items?.find(
+          (x: any) =>
+            String(x.productId) === String(movement.productId) &&
+            x.lineType !== InvoiceLineType.GIFT,
+        );
+        row.revenue += Number(item?.lineTotal || 0);
+      } else if (
+        [
+          InventoryMovementType.INVOICE_GIFT_FROM_TRUCK,
+          InventoryMovementType.PROMOTION_GIFT_FROM_TRUCK,
+        ].includes(movement.type)
+      )
+        row.giftQuantity += qty;
+      else if (
+        movement.type === InventoryMovementType.INVOICE_REVERSAL_TO_TRUCK
+      )
+        row.invoiceReturnQuantity += qty;
+      else if (movement.type === InventoryMovementType.CUSTOMER_RETURN_TO_TRUCK)
+        row.customerReturnQuantity += qty;
+      else if (movement.type === InventoryMovementType.CUSTOMER_RETURN_REVERSED)
+        row.returnReversedQuantity += qty;
+    }
+    for (const ret of manualReturns) {
+      for (const item of ret.items || []) {
+        if (item.itemType !== ReturnItemType.MANUAL) continue;
+        const key = `manual:${String(item.manualCode || item.manualName).toLocaleLowerCase('vi')}`,
+          row = group(key, {
+            code: item.manualCode,
+            name: item.manualName,
+            unit: item.manualUnit,
+          });
+        if (ret.createdAt >= from && ret.createdAt <= to) {
+          row.customerReturnQuantity += Number(item.qty || 0);
+          row.documentKeys.add(`return:${ret.code}`);
+          allDocumentKeys.add(`return:${ret.code}`);
+        }
+        if (
+          ret.status === 'REVERSED' &&
+          ret.reversedAt >= from &&
+          ret.reversedAt <= to
+        ) {
+          row.returnReversedQuantity += Number(item.qty || 0);
+          row.documentKeys.add(`reverse:${ret.code}`);
+          allDocumentKeys.add(`reverse:${ret.code}`);
+        }
+      }
+    }
+    const data = [...groups.values()]
+      .map((row: any) => {
+        const inboundQuantity =
+            row.invoiceReturnQuantity + row.customerReturnQuantity,
+          outboundQuantity =
+            row.soldQuantity + row.giftQuantity + row.returnReversedQuantity;
+        const { documentKeys, ...plain } = row;
+        return {
+          ...plain,
+          documentCount: documentKeys.size,
+          inboundQuantity,
+          outboundQuantity,
+          netQuantity: inboundQuantity - outboundQuantity,
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.outboundQuantity - a.outboundQuantity ||
+          a.name.localeCompare(b.name, 'vi'),
+      );
+    const summary = data.reduce(
+      (s, x) => ({
+        documentCount: allDocumentKeys.size,
+        soldQuantity: s.soldQuantity + x.soldQuantity,
+        giftQuantity: s.giftQuantity + x.giftQuantity,
+        invoiceReturnQuantity:
+          s.invoiceReturnQuantity + x.invoiceReturnQuantity,
+        customerReturnQuantity:
+          s.customerReturnQuantity + x.customerReturnQuantity,
+        returnReversedQuantity:
+          s.returnReversedQuantity + x.returnReversedQuantity,
+        inboundQuantity: s.inboundQuantity + x.inboundQuantity,
+        outboundQuantity: s.outboundQuantity + x.outboundQuantity,
+        netQuantity: s.netQuantity + x.netQuantity,
+        revenue: s.revenue + x.revenue,
+      }),
+      {
+        documentCount: allDocumentKeys.size,
+        soldQuantity: 0,
+        giftQuantity: 0,
+        invoiceReturnQuantity: 0,
+        customerReturnQuantity: 0,
+        returnReversedQuantity: 0,
+        inboundQuantity: 0,
+        outboundQuantity: 0,
+        netQuantity: 0,
+        revenue: 0,
+      },
+    );
+    return {
+      data: {
+        truck: {
+          id: String(truck._id),
+          code: truck.code,
+          name: truck.name,
+          licensePlate: truck.licensePlate,
+        },
+        period: { from, to, timezone: 'Asia/Ho_Chi_Minh' },
+        summary,
+        data,
+      },
+    };
   }
 
-  async exportGoodsReport(truckId:string,query:TruckGoodsReportQueryDto):Promise<Buffer>{const result:any=await this.goodsReport(truckId,query),book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Tổng hợp hàng trên xe',{views:[{state:'frozen',ySplit:1}]});sheet.columns=[{header:'STT',key:'stt',width:7},{header:'Mã xe',key:'truckCode',width:14},{header:'Tên xe',key:'truckName',width:24},{header:'Biển số',key:'plate',width:16},{header:'Từ ngày',key:'from',width:16},{header:'Đến ngày',key:'to',width:16},{header:'Mã sản phẩm',key:'code',width:18},{header:'Tên sản phẩm',key:'name',width:32},{header:'Đơn vị',key:'unit',width:12},{header:'Số chứng từ',key:'documentCount',width:14},{header:'Tồn đầu kỳ',key:'openingQuantity',width:14},{header:'Số lượng bán',key:'soldQuantity',width:15},{header:'Số lượng quà tặng',key:'giftQuantity',width:18},{header:'Hoàn hóa đơn về xe',key:'invoiceReturnQuantity',width:20},{header:'Khách hoàn hàng về xe',key:'customerReturnQuantity',width:22},{header:'Đảo phiếu hoàn',key:'returnReversedQuantity',width:17},{header:'Tổng nhập lại',key:'inboundQuantity',width:15},{header:'Tổng xuất khỏi xe',key:'outboundQuantity',width:18},{header:'Biến động ròng',key:'netQuantity',width:16},{header:'Tồn cuối kỳ',key:'closingQuantity',width:14},{header:'Doanh thu hàng bán',key:'revenue',width:20}];result.data.data.forEach((x:any,i:number)=>sheet.addRow({stt:i+1,truckCode:result.data.truck.code,truckName:result.data.truck.name,plate:result.data.truck.licensePlate,from:query.from||'',to:query.to||'',...x}));sheet.getRow(1).font={bold:true};sheet.autoFilter={from:'A1',to:'U1'};for(const key of ['documentCount','openingQuantity','soldQuantity','giftQuantity','invoiceReturnQuantity','customerReturnQuantity','returnReversedQuantity','inboundQuantity','outboundQuantity','netQuantity','closingQuantity','revenue'])sheet.getColumn(key).numFmt='#,##0';return Buffer.from(await book.xlsx.writeBuffer());}
+  async exportGoodsReport(
+    truckId: string,
+    query: TruckGoodsReportQueryDto,
+  ): Promise<Buffer> {
+    const result: any = await this.goodsReport(truckId, query),
+      book = new ExcelJS.Workbook(),
+      sheet = book.addWorksheet('Tổng hợp hàng trên xe', {
+        views: [{ state: 'frozen', ySplit: 1 }],
+      });
+    sheet.columns = [
+      { header: 'STT', key: 'stt', width: 7 },
+      { header: 'Mã xe', key: 'truckCode', width: 14 },
+      { header: 'Tên xe', key: 'truckName', width: 24 },
+      { header: 'Biển số', key: 'plate', width: 16 },
+      { header: 'Từ ngày', key: 'from', width: 16 },
+      { header: 'Đến ngày', key: 'to', width: 16 },
+      { header: 'Mã sản phẩm', key: 'code', width: 18 },
+      { header: 'Tên sản phẩm', key: 'name', width: 32 },
+      { header: 'Đơn vị', key: 'unit', width: 12 },
+      { header: 'Số chứng từ', key: 'documentCount', width: 14 },
+      { header: 'Tồn đầu kỳ', key: 'openingQuantity', width: 14 },
+      { header: 'Số lượng bán', key: 'soldQuantity', width: 15 },
+      { header: 'Số lượng quà tặng', key: 'giftQuantity', width: 18 },
+      { header: 'Hoàn hóa đơn về xe', key: 'invoiceReturnQuantity', width: 20 },
+      {
+        header: 'Khách hoàn hàng về xe',
+        key: 'customerReturnQuantity',
+        width: 22,
+      },
+      { header: 'Đảo phiếu hoàn', key: 'returnReversedQuantity', width: 17 },
+      { header: 'Tổng nhập lại', key: 'inboundQuantity', width: 15 },
+      { header: 'Tổng xuất khỏi xe', key: 'outboundQuantity', width: 18 },
+      { header: 'Biến động ròng', key: 'netQuantity', width: 16 },
+      { header: 'Tồn cuối kỳ', key: 'closingQuantity', width: 14 },
+      { header: 'Doanh thu hàng bán', key: 'revenue', width: 20 },
+    ];
+    result.data.data.forEach((x: any, i: number) =>
+      sheet.addRow({
+        stt: i + 1,
+        truckCode: result.data.truck.code,
+        truckName: result.data.truck.name,
+        plate: result.data.truck.licensePlate,
+        from: query.from || '',
+        to: query.to || '',
+        ...x,
+      }),
+    );
+    sheet.getRow(1).font = { bold: true };
+    sheet.autoFilter = { from: 'A1', to: 'U1' };
+    for (const key of [
+      'documentCount',
+      'openingQuantity',
+      'soldQuantity',
+      'giftQuantity',
+      'invoiceReturnQuantity',
+      'customerReturnQuantity',
+      'returnReversedQuantity',
+      'inboundQuantity',
+      'outboundQuantity',
+      'netQuantity',
+      'closingQuantity',
+      'revenue',
+    ])
+      sheet.getColumn(key).numFmt = '#,##0';
+    return Buffer.from(await book.xlsx.writeBuffer());
+  }
 
-  private async stockCheckContext(truckId:string){const truck:any=await this.model.findOne({_id:truckId,isDeleted:false}).lean();if(!truck)throw new NotFoundException('Không tìm thấy xe');const ids=(truck.inventory||[]).map((x:any)=>x.productId);const products:any[]=ids.length?await this.productModel.find({_id:{$in:ids}}).select('code name unit').lean():[];const byId=new Map(products.map((x:any)=>[String(x._id),x]));return{truck,rows:(truck.inventory||[]).map((x:any)=>{const p:any=byId.get(String(x.productId))||{};return{productId:String(x.productId),productCode:p.code||'',productName:p.name||'Sản phẩm không còn tồn tại',unit:p.unit||'',systemQuantity:Number(x.qty||0)}})}}
-  async stockCheckTemplate(truckId:string):Promise<Buffer>{const{truck,rows}=await this.stockCheckContext(truckId),book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Kiểm hàng xe',{views:[{state:'frozen',ySplit:1}]});sheet.columns=[{header:'STT',key:'stt',width:7},{header:'MÃ SẢN PHẨM',key:'productCode',width:20},{header:'TÊN SẢN PHẨM',key:'productName',width:36},{header:'ĐƠN VỊ',key:'unit',width:14},{header:'SỐ LƯỢNG TRÊN APP',key:'systemQuantity',width:22},{header:'SỐ LƯỢNG THỰC TẾ',key:'actualQuantity',width:22},{header:'GHI CHÚ',key:'note',width:36}];rows.forEach((x:any,i:number)=>{sheet.addRow({stt:i+1,...x,actualQuantity:null,note:''});sheet.getCell(`F${i+2}`).dataValidation={type:'whole',operator:'greaterThanOrEqual',formulae:[0],allowBlank:true,showErrorMessage:true,errorTitle:'Số lượng không hợp lệ',error:'Chỉ nhập số nguyên lớn hơn hoặc bằng 0'};});sheet.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};sheet.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1565C0'}};sheet.autoFilter={from:'A1',to:'G1'};sheet.getColumn('systemQuantity').numFmt='0';sheet.getColumn('actualQuantity').numFmt='0';sheet.headerFooter.oddHeader=`&L${truck.code} - ${truck.name}&RKiểm hàng xe`;return Buffer.from(await book.xlsx.writeBuffer());}
-  async compareStockCheck(truckId:string,file:any,actorId?:string):Promise<any>{if(!file?.buffer)throw new BadRequestException('Vui lòng tải lên file Excel');if(file.size>10*1024*1024)throw new BadRequestException('File Excel không được vượt quá 10MB');const extension=String(file.originalname||'').toLowerCase();if(!extension.endsWith('.xlsx'))throw new BadRequestException('Chỉ hỗ trợ file .xlsx');const context=await this.stockCheckContext(truckId),book=new ExcelJS.Workbook();try{await book.xlsx.load(file.buffer);}catch{throw new BadRequestException('File Excel không hợp lệ hoặc bị hỏng');}const sheet=book.worksheets[0];if(!sheet)throw new BadRequestException('File Excel không có worksheet');const headers=new Map<string,number>();sheet.getRow(1).eachCell((cell,col)=>headers.set(normalizeExcelHeader(cell.value),col));const codeCol=headers.get(normalizeExcelHeader('MÃ SẢN PHẨM')),actualCol=headers.get(normalizeExcelHeader('SỐ LƯỢNG THỰC TẾ')),noteCol=headers.get(normalizeExcelHeader('GHI CHÚ'));if(!codeCol||!actualCol)throw new BadRequestException('File thiếu cột MÃ SẢN PHẨM hoặc SỐ LƯỢNG THỰC TẾ');const input:any[]=[];for(let rowNumber=2;rowNumber<=sheet.rowCount;rowNumber++){const row=sheet.getRow(rowNumber),code=String(row.getCell(codeCol).text||'').trim().toUpperCase();if(!code)continue;const cell=row.getCell(actualCol),raw=cell.value,blank=raw===null||raw===undefined||String(cell.text).trim()==='';input.push({rowNumber,code,raw,blank,note:noteCol?String(row.getCell(noteCol).text||'').trim():''});}const counts=new Map<string,number>();input.forEach(x=>counts.set(x.code,(counts.get(x.code)||0)+1));const allCodes=[...new Set(input.map(x=>x.code))],allProducts:any[]=allCodes.length?await this.productModel.find({code:{$in:allCodes},isDeleted:{$ne:true}}).select('code name unit').lean():[],productByCode=new Map(allProducts.map(x=>[String(x.code).toUpperCase(),x])),truckByCode=new Map(context.rows.map((x:any)=>[String(x.productCode).toUpperCase(),x])),seen=new Set<string>(),items:any[]=[];for(const row of input){seen.add(row.code);const truckItem:any=truckByCode.get(row.code),product:any=productByCode.get(row.code);let status:TruckStockCheckStatus,actualQuantity:number|undefined,differenceQuantity:number|undefined,note=row.note;if((counts.get(row.code)||0)>1){status=TruckStockCheckStatus.INVALID;note=note||'Mã sản phẩm bị trùng nhiều dòng';}else if(!product&&!truckItem){status=TruckStockCheckStatus.UNKNOWN;note=note||'Mã sản phẩm không tồn tại';}else if(!truckItem){status=TruckStockCheckStatus.NOT_ON_TRUCK;note=note||'Sản phẩm không có trên xe';}else if(row.blank){status=TruckStockCheckStatus.NOT_COUNTED;}else if(typeof row.raw!=='number'||!Number.isInteger(row.raw)||row.raw<0){status=TruckStockCheckStatus.INVALID;note=note||'Số lượng thực tế phải là số nguyên lớn hơn hoặc bằng 0';}else{actualQuantity=row.raw;differenceQuantity=actualQuantity-truckItem.systemQuantity;status=differenceQuantity===0?TruckStockCheckStatus.MATCHED:differenceQuantity<0?TruckStockCheckStatus.SHORTAGE:TruckStockCheckStatus.SURPLUS;}items.push({productId:truckItem?.productId||String(product?._id||''),productCode:row.code,productName:truckItem?.productName||product?.name||'',unit:truckItem?.unit||product?.unit||'',systemQuantity:truckItem?.systemQuantity,actualQuantity,differenceQuantity,status,note,rowNumber:row.rowNumber});}for(const x of context.rows)if(!seen.has(String(x.productCode).toUpperCase()))items.push({...x,status:TruckStockCheckStatus.NOT_COUNTED,note:'Không có dòng đối chiếu trong file'});const summary={totalProducts:context.rows.length,countedProducts:items.filter(x=>[TruckStockCheckStatus.MATCHED,TruckStockCheckStatus.SHORTAGE,TruckStockCheckStatus.SURPLUS].includes(x.status)).length,matchedProducts:items.filter(x=>x.status===TruckStockCheckStatus.MATCHED).length,shortageProducts:items.filter(x=>x.status===TruckStockCheckStatus.SHORTAGE).length,surplusProducts:items.filter(x=>x.status===TruckStockCheckStatus.SURPLUS).length,notCountedProducts:items.filter(x=>x.status===TruckStockCheckStatus.NOT_COUNTED).length,totalShortageQuantity:items.filter(x=>x.status===TruckStockCheckStatus.SHORTAGE).reduce((s,x)=>s+Math.abs(x.differenceQuantity||0),0),totalSurplusQuantity:items.filter(x=>x.status===TruckStockCheckStatus.SURPLUS).reduce((s,x)=>s+(x.differenceQuantity||0),0),unknownProducts:items.filter(x=>x.status===TruckStockCheckStatus.UNKNOWN).length,notOnTruckProducts:items.filter(x=>x.status===TruckStockCheckStatus.NOT_ON_TRUCK).length,invalidRows:items.filter(x=>x.status===TruckStockCheckStatus.INVALID).length};const comparedAt=new Date(),doc:any=await this.stockCheckModel.create({truckId:String(context.truck._id),truckCode:context.truck.code,truckName:context.truck.name,truckLicensePlate:context.truck.licensePlate,comparedAt,summary,items,createdBy:actorId,sourceFileName:file.originalname});return{data:{comparisonId:String(doc._id),truck:{id:String(context.truck._id),code:context.truck.code,name:context.truck.name},comparedAt,summary,items}};}
-  async exportStockCheck(id:string):Promise<Buffer>{const doc:any=await this.stockCheckModel.findOne({_id:id,isDeleted:false}).lean();if(!doc)throw new NotFoundException('Không tìm thấy kết quả đối chiếu');const book=new ExcelJS.Workbook(),sheet=book.addWorksheet('Kết quả đối chiếu',{views:[{state:'frozen',ySplit:1}]});sheet.columns=[{header:'STT',key:'stt',width:7},{header:'MÃ SẢN PHẨM',key:'productCode',width:20},{header:'TÊN SẢN PHẨM',key:'productName',width:36},{header:'ĐƠN VỊ',key:'unit',width:14},{header:'SỐ LƯỢNG TRÊN APP',key:'systemQuantity',width:22},{header:'SỐ LƯỢNG THỰC TẾ',key:'actualQuantity',width:22},{header:'CHÊNH LỆCH',key:'differenceQuantity',width:16},{header:'TRẠNG THÁI',key:'status',width:18},{header:'GHI CHÚ',key:'note',width:36}];doc.items.forEach((x:any,i:number)=>sheet.addRow({stt:i+1,...x}));sheet.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};sheet.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF1565C0'}};sheet.autoFilter={from:'A1',to:'I1'};['systemQuantity','actualQuantity','differenceQuantity'].forEach(k=>sheet.getColumn(k).numFmt='0');const colors:any={MATCHED:'FFC6EFCE',SHORTAGE:'FFFFC7CE',SURPLUS:'FFFCE4D6',NOT_COUNTED:'FFE7E6E6',UNKNOWN:'FFFFEB9C',NOT_ON_TRUCK:'FFFFEB9C',INVALID:'FFFFC7CE'};for(let i=2;i<=sheet.rowCount;i++){const status=String(sheet.getCell(`H${i}`).value||'');sheet.getRow(i).fill={type:'pattern',pattern:'solid',fgColor:{argb:colors[status]||'FFFFFFFF'}};}return Buffer.from(await book.xlsx.writeBuffer());}
+  private async stockCheckContext(truckId: string) {
+    const truck: any = await this.model
+      .findOne({ _id: truckId, isDeleted: false })
+      .lean();
+    if (!truck) throw new NotFoundException('Không tìm thấy xe');
+    const ids = (truck.inventory || []).map((x: any) => x.productId);
+    const products: any[] = ids.length
+      ? await this.productModel
+          .find({ _id: { $in: ids } })
+          .select('code name unit')
+          .lean()
+      : [];
+    const byId = new Map(products.map((x: any) => [String(x._id), x]));
+    return {
+      truck,
+      rows: (truck.inventory || []).map((x: any) => {
+        const p: any = byId.get(String(x.productId)) || {};
+        return {
+          productId: String(x.productId),
+          productCode: p.code || '',
+          productName: p.name || 'Sản phẩm không còn tồn tại',
+          unit: p.unit || '',
+          systemQuantity: Number(x.qty || 0),
+        };
+      }),
+    };
+  }
+  async stockCheckTemplate(truckId: string): Promise<Buffer> {
+    const { truck, rows } = await this.stockCheckContext(truckId),
+      book = new ExcelJS.Workbook(),
+      sheet = book.addWorksheet('Kiểm hàng xe', {
+        views: [{ state: 'frozen', ySplit: 1 }],
+      });
+    sheet.columns = [
+      { header: 'STT', key: 'stt', width: 7 },
+      { header: 'MÃ SẢN PHẨM', key: 'productCode', width: 20 },
+      { header: 'TÊN SẢN PHẨM', key: 'productName', width: 36 },
+      { header: 'ĐƠN VỊ', key: 'unit', width: 14 },
+      { header: 'SỐ LƯỢNG TRÊN APP', key: 'systemQuantity', width: 22 },
+      { header: 'SỐ LƯỢNG THỰC TẾ', key: 'actualQuantity', width: 22 },
+      { header: 'GHI CHÚ', key: 'note', width: 36 },
+    ];
+    rows.forEach((x: any, i: number) => {
+      sheet.addRow({ stt: i + 1, ...x, actualQuantity: null, note: '' });
+      sheet.getCell(`F${i + 2}`).dataValidation = {
+        type: 'whole',
+        operator: 'greaterThanOrEqual',
+        formulae: [0],
+        allowBlank: true,
+        showErrorMessage: true,
+        errorTitle: 'Số lượng không hợp lệ',
+        error: 'Chỉ nhập số nguyên lớn hơn hoặc bằng 0',
+      };
+    });
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1565C0' },
+    };
+    sheet.autoFilter = { from: 'A1', to: 'G1' };
+    sheet.getColumn('systemQuantity').numFmt = '0';
+    sheet.getColumn('actualQuantity').numFmt = '0';
+    sheet.headerFooter.oddHeader = `&L${truck.code} - ${truck.name}&RKiểm hàng xe`;
+    return Buffer.from(await book.xlsx.writeBuffer());
+  }
+  async compareStockCheck(
+    truckId: string,
+    file: any,
+    actorId?: string,
+  ): Promise<any> {
+    if (!file?.buffer)
+      throw new BadRequestException('Vui lòng tải lên file Excel');
+    if (file.size > 10 * 1024 * 1024)
+      throw new BadRequestException('File Excel không được vượt quá 10MB');
+    const extension = String(file.originalname || '').toLowerCase();
+    if (!extension.endsWith('.xlsx'))
+      throw new BadRequestException('Chỉ hỗ trợ file .xlsx');
+    const context = await this.stockCheckContext(truckId),
+      book = new ExcelJS.Workbook();
+    try {
+      await book.xlsx.load(file.buffer);
+    } catch {
+      throw new BadRequestException('File Excel không hợp lệ hoặc bị hỏng');
+    }
+    const sheet = book.worksheets[0];
+    if (!sheet) throw new BadRequestException('File Excel không có worksheet');
+    const headers = new Map<string, number>();
+    sheet
+      .getRow(1)
+      .eachCell((cell, col) =>
+        headers.set(normalizeExcelHeader(cell.value), col),
+      );
+    const codeCol = headers.get(normalizeExcelHeader('MÃ SẢN PHẨM')),
+      actualCol = headers.get(normalizeExcelHeader('SỐ LƯỢNG THỰC TẾ')),
+      noteCol = headers.get(normalizeExcelHeader('GHI CHÚ'));
+    if (!codeCol || !actualCol)
+      throw new BadRequestException(
+        'File thiếu cột MÃ SẢN PHẨM hoặc SỐ LƯỢNG THỰC TẾ',
+      );
+    const input: any[] = [];
+    for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber++) {
+      const row = sheet.getRow(rowNumber),
+        code = String(row.getCell(codeCol).text || '')
+          .trim()
+          .toUpperCase();
+      if (!code) continue;
+      const cell = row.getCell(actualCol),
+        raw = cell.value,
+        blank =
+          raw === null || raw === undefined || String(cell.text).trim() === '';
+      input.push({
+        rowNumber,
+        code,
+        raw,
+        blank,
+        note: noteCol ? String(row.getCell(noteCol).text || '').trim() : '',
+      });
+    }
+    const counts = new Map<string, number>();
+    input.forEach((x) => counts.set(x.code, (counts.get(x.code) || 0) + 1));
+    const allCodes = [...new Set(input.map((x) => x.code))],
+      allProducts: any[] = allCodes.length
+        ? await this.productModel
+            .find({ code: { $in: allCodes }, isDeleted: { $ne: true } })
+            .select('code name unit')
+            .lean()
+        : [],
+      productByCode = new Map(
+        allProducts.map((x) => [String(x.code).toUpperCase(), x]),
+      ),
+      truckByCode = new Map(
+        context.rows.map((x: any) => [String(x.productCode).toUpperCase(), x]),
+      ),
+      seen = new Set<string>(),
+      items: any[] = [];
+    for (const row of input) {
+      seen.add(row.code);
+      const truckItem: any = truckByCode.get(row.code),
+        product: any = productByCode.get(row.code);
+      let status: TruckStockCheckStatus,
+        actualQuantity: number | undefined,
+        differenceQuantity: number | undefined,
+        note = row.note;
+      if ((counts.get(row.code) || 0) > 1) {
+        status = TruckStockCheckStatus.INVALID;
+        note = note || 'Mã sản phẩm bị trùng nhiều dòng';
+      } else if (!product && !truckItem) {
+        status = TruckStockCheckStatus.UNKNOWN;
+        note = note || 'Mã sản phẩm không tồn tại';
+      } else if (!truckItem) {
+        status = TruckStockCheckStatus.NOT_ON_TRUCK;
+        note = note || 'Sản phẩm không có trên xe';
+      } else if (row.blank) {
+        status = TruckStockCheckStatus.NOT_COUNTED;
+      } else if (
+        typeof row.raw !== 'number' ||
+        !Number.isInteger(row.raw) ||
+        row.raw < 0
+      ) {
+        status = TruckStockCheckStatus.INVALID;
+        note = note || 'Số lượng thực tế phải là số nguyên lớn hơn hoặc bằng 0';
+      } else {
+        actualQuantity = row.raw;
+        differenceQuantity = actualQuantity - truckItem.systemQuantity;
+        status =
+          differenceQuantity === 0
+            ? TruckStockCheckStatus.MATCHED
+            : differenceQuantity < 0
+              ? TruckStockCheckStatus.SHORTAGE
+              : TruckStockCheckStatus.SURPLUS;
+      }
+      items.push({
+        productId: truckItem?.productId || String(product?._id || ''),
+        productCode: row.code,
+        productName: truckItem?.productName || product?.name || '',
+        unit: truckItem?.unit || product?.unit || '',
+        systemQuantity: truckItem?.systemQuantity,
+        actualQuantity,
+        differenceQuantity,
+        status,
+        note,
+        rowNumber: row.rowNumber,
+      });
+    }
+    for (const x of context.rows)
+      if (!seen.has(String(x.productCode).toUpperCase()))
+        items.push({
+          ...x,
+          status: TruckStockCheckStatus.NOT_COUNTED,
+          note: 'Không có dòng đối chiếu trong file',
+        });
+    const summary = {
+      totalProducts: context.rows.length,
+      countedProducts: items.filter((x) =>
+        [
+          TruckStockCheckStatus.MATCHED,
+          TruckStockCheckStatus.SHORTAGE,
+          TruckStockCheckStatus.SURPLUS,
+        ].includes(x.status),
+      ).length,
+      matchedProducts: items.filter(
+        (x) => x.status === TruckStockCheckStatus.MATCHED,
+      ).length,
+      shortageProducts: items.filter(
+        (x) => x.status === TruckStockCheckStatus.SHORTAGE,
+      ).length,
+      surplusProducts: items.filter(
+        (x) => x.status === TruckStockCheckStatus.SURPLUS,
+      ).length,
+      notCountedProducts: items.filter(
+        (x) => x.status === TruckStockCheckStatus.NOT_COUNTED,
+      ).length,
+      totalShortageQuantity: items
+        .filter((x) => x.status === TruckStockCheckStatus.SHORTAGE)
+        .reduce((s, x) => s + Math.abs(x.differenceQuantity || 0), 0),
+      totalSurplusQuantity: items
+        .filter((x) => x.status === TruckStockCheckStatus.SURPLUS)
+        .reduce((s, x) => s + (x.differenceQuantity || 0), 0),
+      unknownProducts: items.filter(
+        (x) => x.status === TruckStockCheckStatus.UNKNOWN,
+      ).length,
+      notOnTruckProducts: items.filter(
+        (x) => x.status === TruckStockCheckStatus.NOT_ON_TRUCK,
+      ).length,
+      invalidRows: items.filter(
+        (x) => x.status === TruckStockCheckStatus.INVALID,
+      ).length,
+    };
+    const comparedAt = new Date(),
+      doc: any = await this.stockCheckModel.create({
+        truckId: String(context.truck._id),
+        truckCode: context.truck.code,
+        truckName: context.truck.name,
+        truckLicensePlate: context.truck.licensePlate,
+        comparedAt,
+        summary,
+        items,
+        createdBy: actorId,
+        sourceFileName: file.originalname,
+      });
+    return {
+      data: {
+        comparisonId: String(doc._id),
+        truck: {
+          id: String(context.truck._id),
+          code: context.truck.code,
+          name: context.truck.name,
+        },
+        comparedAt,
+        summary,
+        items,
+      },
+    };
+  }
+  async exportStockCheck(id: string): Promise<Buffer> {
+    const doc: any = await this.stockCheckModel
+      .findOne({ _id: id, isDeleted: false })
+      .lean();
+    if (!doc) throw new NotFoundException('Không tìm thấy kết quả đối chiếu');
+    const book = new ExcelJS.Workbook(),
+      sheet = book.addWorksheet('Kết quả đối chiếu', {
+        views: [{ state: 'frozen', ySplit: 1 }],
+      });
+    sheet.columns = [
+      { header: 'STT', key: 'stt', width: 7 },
+      { header: 'MÃ SẢN PHẨM', key: 'productCode', width: 20 },
+      { header: 'TÊN SẢN PHẨM', key: 'productName', width: 36 },
+      { header: 'ĐƠN VỊ', key: 'unit', width: 14 },
+      { header: 'SỐ LƯỢNG TRÊN APP', key: 'systemQuantity', width: 22 },
+      { header: 'SỐ LƯỢNG THỰC TẾ', key: 'actualQuantity', width: 22 },
+      { header: 'CHÊNH LỆCH', key: 'differenceQuantity', width: 16 },
+      { header: 'TRẠNG THÁI', key: 'status', width: 18 },
+      { header: 'GHI CHÚ', key: 'note', width: 36 },
+    ];
+    doc.items.forEach((x: any, i: number) =>
+      sheet.addRow({ stt: i + 1, ...x }),
+    );
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF1565C0' },
+    };
+    sheet.autoFilter = { from: 'A1', to: 'I1' };
+    ['systemQuantity', 'actualQuantity', 'differenceQuantity'].forEach(
+      (k) => (sheet.getColumn(k).numFmt = '0'),
+    );
+    const colors: any = {
+      MATCHED: 'FFC6EFCE',
+      SHORTAGE: 'FFFFC7CE',
+      SURPLUS: 'FFFCE4D6',
+      NOT_COUNTED: 'FFE7E6E6',
+      UNKNOWN: 'FFFFEB9C',
+      NOT_ON_TRUCK: 'FFFFEB9C',
+      INVALID: 'FFFFC7CE',
+    };
+    for (let i = 2; i <= sheet.rowCount; i++) {
+      const status = String(sheet.getCell(`H${i}`).value || '');
+      sheet.getRow(i).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: colors[status] || 'FFFFFFFF' },
+      };
+    }
+    return Buffer.from(await book.xlsx.writeBuffer());
+  }
 }

@@ -165,6 +165,62 @@ describe('invoice payment with old debt allocation', () => {
   });
 });
 
+describe('truck invoice negative inventory', () => {
+  it('deducts an existing truck balance without requiring enough stock', async () => {
+    const service: any = Object.create(InvoicesService.prototype);
+    service.truckModel = {
+      findOneAndUpdate: jest.fn().mockResolvedValue({
+        inventory: [{ productId: 'product-1', qty: 2 }],
+      }),
+    };
+
+    const before = await service.deductTruckStockAllowNegative(
+      'truck-1',
+      'product-1',
+      5,
+      {},
+    );
+
+    expect(before).toBe(2);
+    expect(service.truckModel.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: 'truck-1',
+        'inventory.productId': 'product-1',
+      }),
+      { $inc: { 'inventory.$.qty': -5 } },
+      expect.objectContaining({ new: false }),
+    );
+  });
+
+  it('creates a negative inventory row when the product was not on the truck', async () => {
+    const service: any = Object.create(InvoicesService.prototype);
+    service.truckModel = {
+      findOneAndUpdate: jest
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ inventory: [] }),
+    };
+
+    const before = await service.deductTruckStockAllowNegative(
+      'truck-1',
+      'product-1',
+      3,
+      {},
+    );
+
+    expect(before).toBe(0);
+    expect(service.truckModel.findOneAndUpdate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        _id: 'truck-1',
+        'inventory.productId': { $ne: 'product-1' },
+      }),
+      { $push: { inventory: { productId: 'product-1', qty: -3 } } },
+      expect.objectContaining({ new: false }),
+    );
+  });
+});
+
 describe('InvoicesService dependency injection', () => {
   it('resolves all transaction models and the Typegoose connection', async () => {
     const models = [
