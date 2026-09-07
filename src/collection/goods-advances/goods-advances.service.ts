@@ -34,6 +34,7 @@ import {
 } from '../notifications/schemas/notifications.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
 import { vietnamDateBoundary } from '../trucks/truck-transfer-date';
+import { parseBusinessDate } from '../../core/business-date';
 @Injectable()
 export class GoodsAdvancesService {
   constructor(
@@ -115,7 +116,7 @@ export class GoodsAdvancesService {
     const resolved = await this.resolve(dto),
       doc: any = await this.model.create({
         code: await this.code(),
-        date: dto.date ? new Date(dto.date) : new Date(),
+        date: parseBusinessDate(dto.date, 'Ngày phiếu tạm ứng'),
         employeeId: String(resolved.employee._id),
         employeeCode: resolved.employee.employeeCode,
         employeeName: resolved.employee.fullName || resolved.employee.username,
@@ -148,7 +149,9 @@ export class GoodsAdvancesService {
     if (!doc) throw new ConflictException('Chỉ có thể sửa phiếu nháp');
     const r = await this.resolve(dto);
     Object.assign(doc, {
-      date: dto.date ? new Date(dto.date) : doc.date,
+      date: dto.date
+        ? parseBusinessDate(dto.date, 'Ngày phiếu tạm ứng')
+        : doc.date,
       employeeId: String(r.employee._id),
       employeeCode: r.employee.employeeCode,
       employeeName: r.employee.fullName || r.employee.username,

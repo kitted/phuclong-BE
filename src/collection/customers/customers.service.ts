@@ -45,6 +45,7 @@ import { createHash } from 'crypto';
 import { ImportCustomerInteractionRowDto } from './dtos/customers.dto';
 import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
 import { RoleEnum } from '../users/interfaces/role.enum';
+import { parseBusinessDate } from '../../core/business-date';
 
 export function normalizePhones(value?: unknown): string[] {
   return String(value ?? '')
@@ -939,9 +940,10 @@ export class CustomersService implements OnModuleInit {
           !row.note?.trim()
         )
           throw new Error('Dòng chưa có nội dung hoặc trạng thái tương tác');
-        const occurredAt = new Date(row.occurredAt);
-        if (Number.isNaN(occurredAt.getTime()))
-          throw new Error('Ngày tương tác không hợp lệ');
+        const occurredAt = parseBusinessDate(
+          row.occurredAt,
+          'Ngày tương tác',
+        );
         const phone = normalizePhones(row.phone).join(', ');
         const importKey = buildCustomerInteractionImportKey(
           row,

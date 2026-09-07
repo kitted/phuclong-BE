@@ -56,6 +56,7 @@ import {
   TruckStockCheckStatus,
 } from './schemas/truck-stock-checks.schema';
 import { normalizeExcelHeader } from '../../core/excel-import';
+import { parseBusinessDate } from '../../core/business-date';
 
 @Injectable()
 export class TrucksService {
@@ -698,9 +699,7 @@ export class TrucksService {
         'Xe nguồn và xe nhận không được giống nhau',
       );
     const items = this.mergedItems(dto.items);
-    const date = dto.date ? new Date(dto.date) : new Date();
-    if (Number.isNaN(+date))
-      throw new BadRequestException('Ngày điều chuyển không hợp lệ');
+    const date = parseBusinessDate(dto.date, 'Ngày điều chuyển');
     const [sourceTruck, destinationTruck]: any[] = await Promise.all([
       this.model
         .findOne({ _id: sourceTruckId, isDeleted: false })
@@ -1046,9 +1045,7 @@ export class TrucksService {
   ): Promise<any> {
     const items = this.mergedItems(dto.items);
     const code = this.transferCode(type, dto.code);
-    const date = dto.date ? new Date(dto.date) : new Date();
-    if (Number.isNaN(date.getTime()))
-      throw new BadRequestException('Ngày chứng từ không hợp lệ');
+    const date = parseBusinessDate(dto.date, 'Ngày chứng từ');
     const session = await this.connection.startSession();
     let result: any;
     try {

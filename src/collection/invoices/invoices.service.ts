@@ -74,6 +74,7 @@ import * as ExcelJS from 'exceljs';
 import { LeadsService } from '../leads/leads.service';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 import { CustomerCoinsService } from '../customer-coins/customer-coins.service';
+import { parseBusinessDate } from '../../core/business-date';
 
 type Actor = { id?: string; role?: RoleEnum; name?: string };
 
@@ -796,12 +797,7 @@ export class InvoicesService {
       throw new BadRequestException('Tên khách hàng mới là bắt buộc');
     if (dto.sourceType === 'truck' && !dto.truckId)
       throw new BadRequestException('Phải chọn xe tải khi xuất từ xe');
-    const date =
-      actor.role === RoleEnum.ADMIN && dto.date
-        ? new Date(dto.date)
-        : new Date();
-    if (Number.isNaN(date.getTime()))
-      throw new BadRequestException('Ngày hóa đơn không hợp lệ');
+    const date = parseBusinessDate(dto.date, 'Ngày hóa đơn');
     const payments = this.normalizedPayments(dto);
     if ((dto.promotionApplications || []).length > 1)
       throw new BadRequestException(

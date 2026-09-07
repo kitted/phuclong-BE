@@ -33,6 +33,7 @@ import {
 } from './schemas/customer-debt-ledger.schema';
 import { Users, UserStatus } from '../users/schemas/users.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
+import { parseBusinessDate } from '../../core/business-date';
 type DebtPaymentActor = { id?: string; role?: RoleEnum };
 @Injectable()
 export class DebtPaymentsService {
@@ -89,12 +90,7 @@ export class DebtPaymentsService {
   ): Promise<any> {
     if (!Types.ObjectId.isValid(customerId))
       throw new BadRequestException('Khách hàng không hợp lệ');
-    const date =
-      actor.role === RoleEnum.ADMIN && dto.date
-        ? new Date(dto.date)
-        : new Date();
-    if (Number.isNaN(+date))
-      throw new BadRequestException('Ngày phiếu thu không hợp lệ');
+    const date = parseBusinessDate(dto.date, 'Ngày phiếu thu');
     const payments = this.normalizePayments(dto.payments);
     const amount = payments.reduce((sum, row) => sum + row.amount, 0);
     const session = await this.connection.startSession();
