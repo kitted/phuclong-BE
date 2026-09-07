@@ -69,6 +69,8 @@ import { CustomerCoinsModule } from 'src/collection/customer-coins/customer-coin
 import { CustomerCoinsController } from './controllers/customer-coins.controller';
 import { DocumentSafetyModule } from 'src/collection/document-safety/document-safety.module';
 import { DocumentSafetyController } from './controllers/document-safety.controller';
+import { WarrantyReturnsModule } from 'src/collection/warranty-returns/warranty-returns.module';
+import { WarrantyReturnsController } from './controllers/warranty-returns.controller';
 
 @Module({
   imports: [
@@ -97,6 +99,7 @@ import { DocumentSafetyController } from './controllers/document-safety.controll
     LeadsModule,
     CustomerCoinsModule,
     DocumentSafetyModule,
+    WarrantyReturnsModule,
   ],
   controllers: [
     UsersController,
@@ -137,6 +140,7 @@ import { DocumentSafetyController } from './controllers/document-safety.controll
     LeadsController,
     CustomerCoinsController,
     DocumentSafetyController,
+    WarrantyReturnsController,
   ],
 })
 export class AdminModule {}
