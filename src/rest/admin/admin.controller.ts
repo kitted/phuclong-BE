@@ -71,6 +71,8 @@ import { DocumentSafetyModule } from 'src/collection/document-safety/document-sa
 import { DocumentSafetyController } from './controllers/document-safety.controller';
 import { WarrantyReturnsModule } from 'src/collection/warranty-returns/warranty-returns.module';
 import { WarrantyReturnsController } from './controllers/warranty-returns.controller';
+import { SalesLocationsModule } from 'src/collection/sales-locations/sales-locations.module';
+import { SalesLocationsController } from './controllers/sales-locations.controller';
 
 @Module({
   imports: [
@@ -100,6 +102,7 @@ import { WarrantyReturnsController } from './controllers/warranty-returns.contro
     CustomerCoinsModule,
     DocumentSafetyModule,
     WarrantyReturnsModule,
+    SalesLocationsModule,
   ],
   controllers: [
     UsersController,
@@ -141,6 +144,7 @@ import { WarrantyReturnsController } from './controllers/warranty-returns.contro
     CustomerCoinsController,
     DocumentSafetyController,
     WarrantyReturnsController,
+    SalesLocationsController,
   ],
 })
 export class AdminModule {}
