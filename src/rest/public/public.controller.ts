@@ -5,6 +5,8 @@ import { WebsiteOrdersModule } from 'src/collection/website-orders/website-order
 import { WebsiteController } from './controllers/website.controller';
 import { WebsiteContentsModule } from 'src/collection/website-contents/website-contents.module';
 import { CustomerCoinsModule } from 'src/collection/customer-coins/customer-coins.module';
+import { WebsiteAnalyticsModule } from 'src/collection/website-analytics/website-analytics.module';
+import { WebsiteAnalyticsController } from './controllers/website-analytics.controller';
 
 @Module({
   imports: [
@@ -12,7 +14,8 @@ import { CustomerCoinsModule } from 'src/collection/customer-coins/customer-coin
     WebsiteOrdersModule,
     WebsiteContentsModule,
     CustomerCoinsModule,
+    WebsiteAnalyticsModule,
   ],
-  controllers: [UsersController, WebsiteController],
+  controllers: [UsersController, WebsiteController, WebsiteAnalyticsController],
 })
 export class PublicModule {}

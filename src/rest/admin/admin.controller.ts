@@ -73,6 +73,8 @@ import { WarrantyReturnsModule } from 'src/collection/warranty-returns/warranty-
 import { WarrantyReturnsController } from './controllers/warranty-returns.controller';
 import { SalesLocationsModule } from 'src/collection/sales-locations/sales-locations.module';
 import { SalesLocationsController } from './controllers/sales-locations.controller';
+import { WebsiteAnalyticsModule } from 'src/collection/website-analytics/website-analytics.module';
+import { WebsiteAnalyticsController } from './controllers/website-analytics.controller';
 
 @Module({
   imports: [
@@ -103,6 +105,7 @@ import { SalesLocationsController } from './controllers/sales-locations.controll
     DocumentSafetyModule,
     WarrantyReturnsModule,
     SalesLocationsModule,
+    WebsiteAnalyticsModule,
   ],
   controllers: [
     UsersController,
@@ -145,6 +148,7 @@ import { SalesLocationsController } from './controllers/sales-locations.controll
     DocumentSafetyController,
     WarrantyReturnsController,
     SalesLocationsController,
+    WebsiteAnalyticsController,
   ],
 })
 export class AdminModule {}
