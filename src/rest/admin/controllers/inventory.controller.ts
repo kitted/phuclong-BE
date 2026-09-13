@@ -27,6 +27,7 @@ import {
 } from '../../../collection/inventory/dtos/inventory.dto';
 import { WarehouseStockCheckService } from '../../../collection/inventory/warehouse-stock-check.service';
 import {
+  PreviewWarehouseStockSyncDto,
   RestoreWarehouseStockDto,
   SyncWarehouseStockDto,
   WarehouseBackupQueryDto,
@@ -147,8 +148,9 @@ export class InventoryStockChecksController {
   }
   @Post(':id/sync/preview') @AdminOnly() preview(
     @Param('id', ParseIdPipe) id: ID,
+    @Body() dto: PreviewWarehouseStockSyncDto,
   ) {
-    return this.service.syncPreview(String(id));
+    return this.service.syncPreview(String(id), dto);
   }
   @Post(':id/sync') @AdminOnly() sync(
     @Param('id', ParseIdPipe) id: ID,

@@ -1,5 +1,20 @@
-import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
-export class SyncWarehouseStockDto {
+import {
+  IsArray,
+  IsIn,
+  IsMongoId,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
+
+export class PreviewWarehouseStockSyncDto {
+  @IsOptional()
+  @IsArray()
+  @IsMongoId({ each: true })
+  deleteProductIds?: string[];
+}
+
+export class SyncWarehouseStockDto extends PreviewWarehouseStockSyncDto {
   @IsString() @MinLength(1) reason: string;
   @IsIn(['DONG BO TON KHO']) confirmation: string;
   @IsString() @MinLength(8) idempotencyKey: string;

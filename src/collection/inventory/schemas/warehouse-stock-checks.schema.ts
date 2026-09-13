@@ -4,6 +4,8 @@ export enum WarehouseStockCheckStatus {
   MATCHED = 'MATCHED',
   SHORTAGE = 'SHORTAGE',
   SURPLUS = 'SURPLUS',
+  NEW_PRODUCT = 'NEW_PRODUCT',
+  MISSING_FROM_FILE = 'MISSING_FROM_FILE',
   NOT_COUNTED = 'NOT_COUNTED',
   UNKNOWN = 'UNKNOWN',
   INVALID = 'INVALID',
@@ -13,6 +15,8 @@ export class WarehouseStockCheckItem {
   @prop() productCode?: string;
   @prop() productName?: string;
   @prop() unit?: string;
+  @prop({ min: 0 }) costPrice?: number;
+  @prop({ min: 0 }) sellPrice?: number;
   @prop({ min: 0 }) systemQuantity?: number;
   @prop({ min: 0 }) actualQuantity?: number;
   @prop() differenceQuantity?: number;
@@ -35,4 +39,6 @@ export class WarehouseStockChecks extends BaseModel {
   @prop() syncReason?: string;
   @prop() syncIdempotencyKey?: string;
   @prop() backupId?: string;
+  @prop({ type: () => [String], default: [] }) deletedProductIds?: string[];
+  @prop({ type: () => [String], default: [] }) createdProductIds?: string[];
 }

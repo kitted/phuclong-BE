@@ -37,6 +37,7 @@ import {
 } from '../audit-logs/schemas/audit-logs.schema';
 import { normalizeExcelHeader } from '../../core/excel-import';
 import {
+  PreviewWarehouseStockSyncDto,
   RestoreWarehouseStockDto,
   SyncWarehouseStockDto,
   WarehouseBackupQueryDto,
@@ -142,6 +143,10 @@ export class WarehouseStockCheckService {
         headers.set(normalizeExcelHeader(cell.value), col),
       );
     const codeCol = headers.get(normalizeExcelHeader('MÃ SẢN PHẨM')),
+      nameCol = headers.get(normalizeExcelHeader('TÊN SẢN PHẨM')),
+      unitCol = headers.get(normalizeExcelHeader('ĐƠN VỊ')),
+      costPriceCol = headers.get(normalizeExcelHeader('GIÁ VỐN')),
+      sellPriceCol = headers.get(normalizeExcelHeader('GIÁ BÁN')),
       actualCol = headers.get(normalizeExcelHeader('SỐ LƯỢNG THỰC TẾ')),
       noteCol = headers.get(normalizeExcelHeader('GHI CHÚ'));
     if (!codeCol || !actualCol)
@@ -164,6 +169,16 @@ export class WarehouseStockCheckService {
         code,
         raw,
         blank,
+        productName: nameCol
+          ? String(row.getCell(nameCol).text || '').trim()
+          : '',
+        unit: unitCol ? String(row.getCell(unitCol).text || '').trim() : '',
+        costPrice: costPriceCol
+          ? Number(row.getCell(costPriceCol).value || 0)
+          : undefined,
+        sellPrice: sellPriceCol
+          ? Number(row.getCell(sellPriceCol).value || 0)
+          : undefined,
         note: noteCol ? String(row.getCell(noteCol).text || '').trim() : '',
       });
     }
@@ -184,11 +199,9 @@ export class WarehouseStockCheckService {
       if ((counts.get(row.code) || 0) > 1) {
         status = WarehouseStockCheckStatus.INVALID;
         note = note || 'Mã sản phẩm bị trùng nhiều dòng';
-      } else if (!p) {
-        status = WarehouseStockCheckStatus.UNKNOWN;
-        note = note || 'Mã sản phẩm không tồn tại';
       } else if (row.blank) {
         status = WarehouseStockCheckStatus.NOT_COUNTED;
+        note = note || (p ? '' : 'Mã mới chưa có số lượng thực tế');
       } else if (
         typeof row.raw !== 'number' ||
         !Number.isInteger(row.raw) ||
@@ -196,6 +209,15 @@ export class WarehouseStockCheckService {
       ) {
         status = WarehouseStockCheckStatus.INVALID;
         note = note || 'Số lượng thực tế phải là số nguyên lớn hơn hoặc bằng 0';
+      } else if (!p && (!row.productName || !row.unit)) {
+        status = WarehouseStockCheckStatus.INVALID;
+        note =
+          note || 'Mã mới phải có tên sản phẩm và đơn vị trong file Excel';
+      } else if (!p) {
+        actualQuantity = row.raw;
+        differenceQuantity = actualQuantity;
+        status = WarehouseStockCheckStatus.NEW_PRODUCT;
+        note = note || 'Sản phẩm mới sẽ được tạo khi đồng bộ';
       } else {
         actualQuantity = row.raw;
         differenceQuantity = actualQuantity - Number(p.stock || 0);
@@ -209,8 +231,10 @@ export class WarehouseStockCheckService {
       items.push({
         productId: p ? String(p._id) : undefined,
         productCode: row.code,
-        productName: p?.name || '',
-        unit: p?.unit || '',
+        productName: p?.name || row.productName,
+        unit: p?.unit || row.unit,
+        costPrice: p ? Number(p.costPrice || 0) : row.costPrice,
+        sellPrice: p ? Number(p.sellPrice || 0) : row.sellPrice,
         systemQuantity: p ? Number(p.stock || 0) : undefined,
         actualQuantity,
         differenceQuantity,
@@ -227,8 +251,8 @@ export class WarehouseStockCheckService {
           productName: p.name,
           unit: p.unit || '',
           systemQuantity: Number(p.stock || 0),
-          status: WarehouseStockCheckStatus.NOT_COUNTED,
-          note: 'Không có dòng đối chiếu trong file',
+          status: WarehouseStockCheckStatus.MISSING_FROM_FILE,
+          note: 'Không có trong file; chỉ xóa khi admin đánh dấu',
         });
     const summary = this.comparisonSummary(items),
       comparedAt = new Date(),
@@ -245,12 +269,15 @@ export class WarehouseStockCheckService {
   }
   private comparisonSummary(items: any[]) {
     return {
-      totalProducts: items.filter((x) => x.productId).length,
+      totalProducts: items.filter(
+        (x) => x.status !== WarehouseStockCheckStatus.MISSING_FROM_FILE,
+      ).length,
       countedProducts: items.filter((x) =>
         [
           WarehouseStockCheckStatus.MATCHED,
           WarehouseStockCheckStatus.SHORTAGE,
           WarehouseStockCheckStatus.SURPLUS,
+          WarehouseStockCheckStatus.NEW_PRODUCT,
         ].includes(x.status),
       ).length,
       matchedProducts: items.filter(
@@ -274,6 +301,12 @@ export class WarehouseStockCheckService {
       unknownProducts: items.filter(
         (x) => x.status === WarehouseStockCheckStatus.UNKNOWN,
       ).length,
+      newProducts: items.filter(
+        (x) => x.status === WarehouseStockCheckStatus.NEW_PRODUCT,
+      ).length,
+      missingFromFileProducts: items.filter(
+        (x) => x.status === WarehouseStockCheckStatus.MISSING_FROM_FILE,
+      ).length,
       invalidRows: items.filter(
         (x) => x.status === WarehouseStockCheckStatus.INVALID,
       ).length,
@@ -285,17 +318,35 @@ export class WarehouseStockCheckService {
         (x: any) =>
           [
             WarehouseStockCheckStatus.NOT_COUNTED,
-            WarehouseStockCheckStatus.UNKNOWN,
             WarehouseStockCheckStatus.INVALID,
           ].includes(x.status) ||
-          !Number.isInteger(x.actualQuantity) ||
-          x.actualQuantity < 0,
+          (x.status !== WarehouseStockCheckStatus.MISSING_FROM_FILE &&
+            (!Number.isInteger(x.actualQuantity) || x.actualQuantity < 0)),
       )
       .map((x: any) => ({
         productCode: x.productCode,
         status: x.status,
         message: `${x.productCode || 'Dòng'} chưa đủ điều kiện đồng bộ`,
       }));
+  }
+  private selectedDeletionIds(check: any, input?: string[]) {
+    const selected = [...new Set((input || []).map(String))],
+      candidates = new Set(
+        (check.items || [])
+          .filter(
+            (x: any) =>
+              x.status === WarehouseStockCheckStatus.MISSING_FROM_FILE,
+          )
+          .map((x: any) => String(x.productId)),
+      ),
+      invalid = selected.filter((id) => !candidates.has(id));
+    if (invalid.length)
+      throw new BadRequestException({
+        code: 'INVALID_DELETE_PRODUCT_SELECTION',
+        message: 'Danh sách sản phẩm cần xóa không thuộc kết quả đối chiếu',
+        productIds: invalid,
+      });
+    return selected;
   }
   private stale(check: any, products: any[]) {
     const expected = new Map<string, number>(
@@ -328,12 +379,19 @@ export class WarehouseStockCheckService {
             : 'QUANTITY_CHANGED',
       }));
   }
-  async syncPreview(id: string): Promise<any> {
+  async syncPreview(
+    id: string,
+    dto: PreviewWarehouseStockSyncDto = {},
+  ): Promise<any> {
     const check: any = await this.checks
       .findOne({ _id: id, isDeleted: false })
       .lean();
     if (!check) throw new NotFoundException('Không tìm thấy kết quả đối chiếu');
-    const products: any[] = await this.activeProducts(),
+    const deleteProductIds = this.selectedDeletionIds(
+        check,
+        dto.deleteProductIds,
+      ),
+      products: any[] = await this.activeProducts(),
       blockers = this.blockers(check),
       changedProducts = this.stale(check, products);
     if (check.syncedAt)
@@ -350,8 +408,25 @@ export class WarehouseStockCheckService {
     return {
       data: {
         canSync: blockers.length === 0,
-        summary: this.comparisonSummary(check.items || []),
-        warnings: [],
+        summary: {
+          ...this.comparisonSummary(check.items || []),
+          createProducts: (check.items || []).filter(
+            (x: any) => x.status === WarehouseStockCheckStatus.NEW_PRODUCT,
+          ).length,
+          deleteProducts: deleteProductIds.length,
+        },
+        warnings: [
+          ...((check.items || []).some(
+            (x: any) => x.status === WarehouseStockCheckStatus.NEW_PRODUCT,
+          )
+            ? ['Các mã mới hợp lệ sẽ được tạo thành hàng hóa mới.']
+            : []),
+          ...(deleteProductIds.length
+            ? [
+                `${deleteProductIds.length} sản phẩm được chọn sẽ bị xóa mềm khỏi hệ thống.`,
+              ]
+            : []),
+        ],
         blockers,
       },
     };
@@ -463,6 +538,10 @@ export class WarehouseStockCheckService {
             code: 'WAREHOUSE_STOCK_CHECK_ALREADY_SYNCED',
             message: 'Kết quả đã được đồng bộ',
           });
+        const deleteProductIds = this.selectedDeletionIds(
+          check,
+          dto.deleteProductIds,
+        );
         const blockers = this.blockers(check);
         if (blockers.length)
           throw new ConflictException({
@@ -480,20 +559,33 @@ export class WarehouseStockCheckService {
             session,
             String(check._id),
           ),
-          byId = new Map(
-            (check.items || []).map((x: any) => [
-              String(x.productId),
-              Number(x.actualQuantity),
-            ]),
+          countableStatuses = new Set([
+            WarehouseStockCheckStatus.MATCHED,
+            WarehouseStockCheckStatus.SHORTAGE,
+            WarehouseStockCheckStatus.SURPLUS,
+          ]),
+          byId = new Map<string, number>(
+            (check.items || [])
+              .filter(
+                (x: any) => x.productId && countableStatuses.has(x.status),
+              )
+              .map((x: any) => [
+                String(x.productId),
+                Number(x.actualQuantity),
+              ]),
+          ),
+          productById = new Map(
+            products.map((product: any) => [String(product._id), product]),
           ),
           movementRows: any[] = [];
-        for (const product of products) {
+        for (const [productId, after] of byId) {
+          const product: any = productById.get(productId);
+          if (!product) continue;
           const before = Number(product.stock || 0),
-            after = Number(byId.get(String(product._id)));
+            delta = after - before;
           if (before === after) continue;
           product.stock = after;
           await product.save({ session });
-          const delta = after - before;
           movementRows.push({
             productId: product._id,
             type:
@@ -514,6 +606,87 @@ export class WarehouseStockCheckService {
             createdBy: actorId,
           });
         }
+        for (const productId of deleteProductIds) {
+          const product: any = productById.get(productId);
+          if (!product) continue;
+          const before = Number(product.stock || 0);
+          product.stock = 0;
+          product.isDeleted = true;
+          product.deletedAt = new Date();
+          product.deletedBy = actorId;
+          await product.save({ session });
+          if (before)
+            movementRows.push({
+              productId: product._id,
+              type: InventoryMovementType.WAREHOUSE_STOCK_CHECK_LOSS,
+              quantityChange: -before,
+              quantityBefore: before,
+              quantityAfter: 0,
+              sourceType: InventoryLocationType.WAREHOUSE,
+              referenceType: 'WAREHOUSE_STOCK_CHECK',
+              referenceId: String(check._id),
+              referenceCode: backup.code,
+              backupId: String(backup._id),
+              reason: dto.reason.trim(),
+              createdBy: actorId,
+            });
+        }
+        const createdProductIds: string[] = [];
+        for (const item of (check.items || []).filter(
+          (x: any) => x.status === WarehouseStockCheckStatus.NEW_PRODUCT,
+        )) {
+          const code = String(item.productCode || '')
+              .trim()
+              .toUpperCase(),
+            actualQuantity = Number(item.actualQuantity),
+            existing: any = await this.products
+              .findOne({ code })
+              .session(session);
+          let product: any;
+          if (existing) {
+            existing.name = item.productName;
+            existing.unit = item.unit;
+            if (item.costPrice !== undefined)
+              existing.costPrice = Number(item.costPrice || 0);
+            if (item.sellPrice !== undefined)
+              existing.sellPrice = Number(item.sellPrice || 0);
+            existing.stock = actualQuantity;
+            existing.isDeleted = false;
+            existing.deletedAt = null;
+            existing.deletedBy = null;
+            product = await existing.save({ session });
+          } else {
+            [product] = await this.products.create(
+              [
+                {
+                  code,
+                  name: item.productName,
+                  unit: item.unit,
+                  costPrice: Number(item.costPrice || 0),
+                  sellPrice: Number(item.sellPrice || 0),
+                  stock: actualQuantity,
+                },
+              ],
+              { session },
+            );
+          }
+          createdProductIds.push(String(product._id));
+          if (actualQuantity)
+            movementRows.push({
+              productId: product._id,
+              type: InventoryMovementType.WAREHOUSE_STOCK_CHECK_GAIN,
+              quantityChange: actualQuantity,
+              quantityBefore: 0,
+              quantityAfter: actualQuantity,
+              destinationType: InventoryLocationType.WAREHOUSE,
+              referenceType: 'WAREHOUSE_STOCK_CHECK',
+              referenceId: String(check._id),
+              referenceCode: backup.code,
+              backupId: String(backup._id),
+              reason: dto.reason.trim(),
+              createdBy: actorId,
+            });
+        }
         if (movementRows.length)
           await this.movements.insertMany(movementRows, { session });
         check.syncedAt = new Date();
@@ -521,6 +694,8 @@ export class WarehouseStockCheckService {
         check.syncReason = dto.reason.trim();
         check.syncIdempotencyKey = dto.idempotencyKey;
         check.backupId = String(backup._id);
+        check.deletedProductIds = deleteProductIds;
+        check.createdProductIds = createdProductIds;
         await check.save({ session });
         await Promise.all([
           this.notifications.create(
@@ -564,6 +739,8 @@ export class WarehouseStockCheckService {
           backupId: String(backup._id),
           backupCode: backup.code,
           movements: movementRows.length,
+          productsCreated: createdProductIds.length,
+          productsDeleted: deleteProductIds.length,
           syncedAt: check.syncedAt,
         };
       });
