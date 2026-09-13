@@ -665,6 +665,25 @@ export class TrucksService {
     return [...merged].map(([productId, qty]) => ({ productId, qty }));
   }
 
+  private truckInventoryQuantities(truck: any) {
+    const quantities = new Map<string, number>();
+    for (const item of truck?.inventory || []) {
+      const productId = String(item.productId || '');
+      if (!Types.ObjectId.isValid(productId)) continue;
+      quantities.set(
+        productId,
+        (quantities.get(productId) || 0) + Number(item.qty || 0),
+      );
+    }
+    return quantities;
+  }
+
+  private truckInventoryRows(quantities: Map<string, number>) {
+    return [...quantities]
+      .filter(([, qty]) => qty !== 0)
+      .map(([productId, qty]) => ({ productId, qty }));
+  }
+
   private transferCode(type: TruckTransferType, requested?: string) {
     return (
       requested?.trim().toUpperCase() ||
@@ -753,18 +772,9 @@ export class TrucksService {
     const productMap = new Map<string, any>(
       products.map((product) => [String(product._id), product]),
     );
-    const sourceInventory = new Map<string, number>(
-      (sourceTruck.inventory || []).map((item) => [
-        String(item.productId),
-        Number(item.qty) || 0,
-      ]),
-    );
-    const destinationInventory = new Map<string, number>(
-      (destinationTruck.inventory || []).map((item) => [
-        String(item.productId),
-        Number(item.qty) || 0,
-      ]),
-    );
+    const sourceInventory = this.truckInventoryQuantities(sourceTruck);
+    const destinationInventory =
+      this.truckInventoryQuantities(destinationTruck);
     const snapshots = items.map((item) => {
       const product: any = productMap.get(item.productId);
       const sourceQuantity = sourceInventory.get(item.productId) || 0;
@@ -874,52 +884,44 @@ export class TrucksService {
           { upsert: true, new: true, session },
         );
         const code = `CX-${day}-${String(counter.sequence).padStart(6, '0')}`;
+        const sourceInventory = this.truckInventoryQuantities(
+            context.sourceTruck,
+          ),
+          destinationInventory = this.truckInventoryQuantities(
+            context.destinationTruck,
+          );
         for (const item of context.snapshots) {
-          const source = await this.model.updateOne(
-            {
-              _id: context.sourceTruck._id,
-              inventory: {
-                $elemMatch: {
-                  productId: item.productId,
-                  qty: { $gte: item.qty },
-                },
-              },
-            },
-            { $inc: { 'inventory.$.qty': -item.qty } },
-            { session },
+          sourceInventory.set(
+            String(item.productId),
+            item.sourceQuantityAfter,
           );
-          if (source.modifiedCount !== 1)
-            throw new ConflictException({
-              code: 'SOURCE_TRUCK_INSUFFICIENT_STOCK',
-              message: 'Tồn xe nguồn vừa thay đổi',
-              details: { productId: item.productId },
-            });
-          const destination = await this.model.updateOne(
-            {
-              _id: context.destinationTruck._id,
-              inventory: { $elemMatch: { productId: item.productId } },
-            },
-            { $inc: { 'inventory.$.qty': item.qty } },
-            { session },
+          destinationInventory.set(
+            String(item.productId),
+            item.destinationQuantityAfter,
           );
-          if (destination.modifiedCount !== 1)
-            await this.model.updateOne(
-              { _id: context.destinationTruck._id },
-              {
-                $push: {
-                  inventory: { productId: item.productId, qty: item.qty },
-                },
-              },
-              { session },
-            );
         }
-        // Chỉ bỏ dòng đã về đúng 0. Số âm do hóa đơn bán vượt tồn phải được giữ
-        // để lần ứng hàng sau tự cộng bù vào công nợ hàng của xe.
-        await this.model.updateOne(
-          { _id: context.sourceTruck._id },
-          { $pull: { inventory: { qty: 0 } } },
-          { session },
-        );
+        const [sourceWrite, destinationWrite] = await Promise.all([
+          this.model.updateOne(
+            { _id: context.sourceTruck._id, isDeleted: false },
+            { $set: { inventory: this.truckInventoryRows(sourceInventory) } },
+            { session },
+          ),
+          this.model.updateOne(
+            { _id: context.destinationTruck._id, isDeleted: false },
+            {
+              $set: {
+                inventory: this.truckInventoryRows(destinationInventory),
+              },
+            },
+            { session },
+          ),
+        ]);
+        if (sourceWrite.matchedCount !== 1 || destinationWrite.matchedCount !== 1)
+          throw new ConflictException({
+            code: 'TRUCK_STOCK_CHANGED',
+            message:
+              'Tồn xe vừa thay đổi trong lúc chuyển hàng, vui lòng kiểm tra lại',
+          });
         const transfer: any = (
           await this.transferModel.create(
             [
@@ -973,6 +975,41 @@ export class TrucksService {
             { session },
           )
         )[0];
+        await this.movements.recordMany(
+          context.snapshots.flatMap((item) => [
+            {
+              productId: String(item.productId),
+              type: InventoryMovementType.TRUCK_TO_TRUCK_OUT,
+              quantityChange: -item.qty,
+              quantityBefore: item.sourceQuantityBefore,
+              quantityAfter: item.sourceQuantityAfter,
+              sourceType: InventoryLocationType.TRUCK,
+              sourceTruckId: String(context.sourceTruck._id),
+              destinationType: InventoryLocationType.TRUCK,
+              destinationTruckId: String(context.destinationTruck._id),
+              referenceType: 'TRUCK_TO_TRUCK',
+              referenceId: String(transfer._id),
+              referenceCode: code,
+              createdBy: createdBy || undefined,
+            },
+            {
+              productId: String(item.productId),
+              type: InventoryMovementType.TRUCK_TO_TRUCK_IN,
+              quantityChange: item.qty,
+              quantityBefore: item.destinationQuantityBefore,
+              quantityAfter: item.destinationQuantityAfter,
+              sourceType: InventoryLocationType.TRUCK,
+              sourceTruckId: String(context.sourceTruck._id),
+              destinationType: InventoryLocationType.TRUCK,
+              destinationTruckId: String(context.destinationTruck._id),
+              referenceType: 'TRUCK_TO_TRUCK',
+              referenceId: String(transfer._id),
+              referenceCode: code,
+              createdBy: createdBy || undefined,
+            },
+          ]),
+          session,
+        );
         const [sourceUpdated, destinationUpdated]: any[] = await Promise.all([
           this.model.findById(context.sourceTruck._id).session(session).lean(),
           this.model

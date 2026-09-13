@@ -32,6 +32,24 @@ describe('TrucksService dependency injection', () => {
       ],
     }).compile();
 
-    expect(module.get(TrucksService)).toBeDefined();
+    const service = module.get(TrucksService);
+    expect(service).toBeDefined();
+
+    const quantities: Map<string, number> = (
+      service as any
+    ).truckInventoryQuantities({
+      inventory: [
+        { productId: '507f1f77bcf86cd799439011', qty: 3 },
+        { productId: '507f1f77bcf86cd799439011', qty: 4 },
+        { productId: '507f191e810c19729de860ea', qty: -2 },
+      ],
+    });
+    expect(quantities.get('507f1f77bcf86cd799439011')).toBe(7);
+    expect(quantities.get('507f191e810c19729de860ea')).toBe(-2);
+
+    quantities.set('507f1f77bcf86cd799439011', 0);
+    expect((service as any).truckInventoryRows(quantities)).toEqual([
+      { productId: '507f191e810c19729de860ea', qty: -2 },
+    ]);
   });
 });
