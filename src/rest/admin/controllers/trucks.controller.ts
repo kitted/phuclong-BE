@@ -38,6 +38,7 @@ import { AdminOnly } from '../decorators/admin-only';
 import { TruckStockSyncService } from '../../../collection/trucks/truck-stock-sync.service';
 import {
   InventoryBackupQueryDto,
+  PreviewTruckStockSyncDto,
   RestoreTruckInventoryDto,
   SyncTruckStockDto,
 } from '../../../collection/trucks/dtos/truck-stock-sync.dto';
@@ -291,8 +292,9 @@ export class TruckStockChecksController {
   }
   @Post(':id/sync/preview') @AdminOnly() preview(
     @Param('id', ParseIdPipe) id: ID,
+    @Body() dto: PreviewTruckStockSyncDto,
   ): Promise<any> {
-    return this.stockSync.syncPreview(String(id));
+    return this.stockSync.syncPreview(String(id), dto);
   }
   @Post(':id/sync') @AdminOnly() sync(
     @Param('id', ParseIdPipe) id: ID,

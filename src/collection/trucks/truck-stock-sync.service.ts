@@ -38,6 +38,7 @@ import {
 } from '../audit-logs/schemas/audit-logs.schema';
 import {
   InventoryBackupQueryDto,
+  PreviewTruckStockSyncDto,
   RestoreTruckInventoryDto,
   SyncTruckStockDto,
 } from './dtos/truck-stock-sync.dto';
@@ -66,14 +67,13 @@ export class TruckStockSyncService {
       TruckStockCheckStatus.NOT_COUNTED,
       TruckStockCheckStatus.INVALID,
       TruckStockCheckStatus.UNKNOWN,
-      TruckStockCheckStatus.NOT_ON_TRUCK,
     ];
     return (check.items || [])
       .filter(
         (x: any) =>
           blocked.includes(x.status) ||
-          !Number.isInteger(x.actualQuantity) ||
-          x.actualQuantity < 0,
+          (x.status !== TruckStockCheckStatus.MISSING_FROM_FILE &&
+            (!Number.isInteger(x.actualQuantity) || x.actualQuantity < 0)),
       )
       .map((x: any) => ({
         productCode: x.productCode,
@@ -81,19 +81,40 @@ export class TruckStockSyncService {
         message: `${x.productCode || 'Dòng'} chưa đủ điều kiện đồng bộ`,
       }));
   }
+  private selectedDeletionIds(check: any, input?: string[]) {
+    const selected = [...new Set((input || []).map(String))],
+      candidates = new Set(
+        (check.items || [])
+          .filter(
+            (x: any) => x.status === TruckStockCheckStatus.MISSING_FROM_FILE,
+          )
+          .map((x: any) => String(x.productId)),
+      ),
+      invalid = selected.filter((id) => !candidates.has(id));
+    if (invalid.length)
+      throw new BadRequestException({
+        code: 'INVALID_DELETE_TRUCK_PRODUCT_SELECTION',
+        message: 'Danh sách hàng cần xóa không thuộc kết quả đối chiếu',
+        productIds: invalid,
+      });
+    return selected;
+  }
   private stale(check: any, truck: any) {
     const expected = new Map<string, number>(
         (check.items || [])
           .filter((x: any) => x.productId && x.systemQuantity !== undefined)
           .map((x: any) => [String(x.productId), Number(x.systemQuantity)]),
       ),
-      current = new Map<string, number>(
-        (truck.inventory || []).map((x: any) => [
-          String(x.productId),
-          Number(x.qty || 0),
-        ]),
-      ),
+      current = new Map<string, number>(),
       ids = new Set([...expected.keys(), ...current.keys()]);
+    for (const item of truck.inventory || []) {
+      const productId = String(item.productId);
+      current.set(
+        productId,
+        (current.get(productId) || 0) + Number(item.qty || 0),
+      );
+      ids.add(productId);
+    }
     return [...ids]
       .filter((id) => (expected.get(id) || 0) !== (current.get(id) || 0))
       .map((productId) => ({
@@ -105,7 +126,17 @@ export class TruckStockSyncService {
   private summary(check: any) {
     const items = check.items || [];
     return {
-      totalProducts: items.length,
+      totalProducts: items.filter(
+        (x: any) => x.status !== TruckStockCheckStatus.MISSING_FROM_FILE,
+      ).length,
+      countedProducts: items.filter((x: any) =>
+        [
+          TruckStockCheckStatus.MATCHED,
+          TruckStockCheckStatus.SHORTAGE,
+          TruckStockCheckStatus.SURPLUS,
+          TruckStockCheckStatus.NOT_ON_TRUCK,
+        ].includes(x.status),
+      ).length,
       matchedProducts: items.filter(
         (x: any) => x.status === TruckStockCheckStatus.MATCHED,
       ).length,
@@ -124,9 +155,20 @@ export class TruckStockSyncService {
       surplusQuantity: items
         .filter((x: any) => x.status === TruckStockCheckStatus.SURPLUS)
         .reduce((s: number, x: any) => s + (x.differenceQuantity || 0), 0),
+      createProducts: items.filter(
+        (x: any) =>
+          x.status === TruckStockCheckStatus.NOT_ON_TRUCK &&
+          Number(x.actualQuantity) > 0,
+      ).length,
+      missingFromFileProducts: items.filter(
+        (x: any) => x.status === TruckStockCheckStatus.MISSING_FROM_FILE,
+      ).length,
     };
   }
-  async syncPreview(id: string): Promise<any> {
+  async syncPreview(
+    id: string,
+    dto: PreviewTruckStockSyncDto = {},
+  ): Promise<any> {
     const check: any = await this.checks
       .findOne({ _id: id, isDeleted: false })
       .lean();
@@ -135,7 +177,11 @@ export class TruckStockSyncService {
       .findOne({ _id: check.truckId, isDeleted: false })
       .lean();
     if (!truck) throw new NotFoundException('Không tìm thấy xe');
-    const blockers = this.blockers(check);
+    const deleteProductIds = this.selectedDeletionIds(
+        check,
+        dto.deleteProductIds,
+      ),
+      blockers = this.blockers(check);
     if (check.syncedAt)
       blockers.push({
         code: 'STOCK_CHECK_ALREADY_SYNCED',
@@ -157,8 +203,24 @@ export class TruckStockSyncService {
           name: truck.name,
           licensePlate: truck.licensePlate,
         },
-        summary: this.summary(check),
-        warnings: [],
+        summary: {
+          ...this.summary(check),
+          deleteProducts: deleteProductIds.length,
+        },
+        warnings: [
+          ...((check.items || []).some(
+            (x: any) =>
+              x.status === TruckStockCheckStatus.NOT_ON_TRUCK &&
+              Number(x.actualQuantity) > 0,
+          )
+            ? ['Các mã hợp lệ chưa có trên xe sẽ được tự động thêm vào xe.']
+            : []),
+          ...(deleteProductIds.length
+            ? [
+                `${deleteProductIds.length} sản phẩm được chọn sẽ bị xóa khỏi tồn xe.`,
+              ]
+            : []),
+        ],
         blockers,
       },
     };
@@ -288,7 +350,11 @@ export class TruckStockSyncService {
             code: 'STOCK_CHECK_ALREADY_SYNCED',
             message: 'Kết quả đã được đồng bộ',
           });
-        const blockers = this.blockers(check);
+        const deleteProductIds = this.selectedDeletionIds(
+            check,
+            dto.deleteProductIds,
+          ),
+          blockers = this.blockers(check);
         if (blockers.length)
           throw new ConflictException({
             code: 'STOCK_CHECK_BLOCKED',
@@ -309,53 +375,70 @@ export class TruckStockSyncService {
             session,
             String(check._id),
           ),
-          before = new Map<string, number>(
-            (truck.inventory || []).map((x: any) => [
-              String(x.productId),
-              Number(x.qty || 0),
-            ]),
+          before = new Map<string, number>();
+        for (const item of truck.inventory || []) {
+          const productId = String(item.productId);
+          before.set(
+            productId,
+            (before.get(productId) || 0) + Number(item.qty || 0),
           );
-        truck.inventory = (check.items || [])
-          .filter((x: any) => x.productId && x.actualQuantity > 0)
-          .map((x: any) => ({ productId: x.productId, qty: x.actualQuantity }));
+        }
+        const after = new Map(before),
+          countableStatuses = new Set([
+            TruckStockCheckStatus.MATCHED,
+            TruckStockCheckStatus.SHORTAGE,
+            TruckStockCheckStatus.SURPLUS,
+            TruckStockCheckStatus.NOT_ON_TRUCK,
+          ]);
+        for (const item of check.items || []) {
+          if (!item.productId || !countableStatuses.has(item.status)) continue;
+          const productId = String(item.productId),
+            actualQuantity = Number(item.actualQuantity);
+          if (actualQuantity > 0) after.set(productId, actualQuantity);
+          else after.delete(productId);
+        }
+        for (const productId of deleteProductIds) after.delete(productId);
+        truck.inventory = [...after].map(([productId, qty]) => ({
+          productId,
+          qty,
+        }));
         await truck.save({ session });
-        const movementRows = (check.items || [])
-          .filter(
-            (x: any) =>
-              x.productId &&
-              Number(x.actualQuantity) !==
-                (before.get(String(x.productId)) || 0),
-          )
-          .map((x: any) => {
-            const quantityBefore = before.get(String(x.productId)) || 0,
-              quantityAfter = Number(x.actualQuantity),
-              delta = quantityAfter - quantityBefore;
-            return {
-              productId: x.productId,
-              type:
-                delta > 0
-                  ? InventoryMovementType.TRUCK_STOCK_CHECK_GAIN
-                  : InventoryMovementType.TRUCK_STOCK_CHECK_LOSS,
-              quantityChange: delta,
-              quantityBefore,
-              quantityAfter,
-              ...(delta > 0
-                ? {
-                    destinationType: InventoryLocationType.TRUCK,
-                    destinationTruckId: truck._id,
-                  }
-                : {
-                    sourceType: InventoryLocationType.TRUCK,
-                    sourceTruckId: truck._id,
-                  }),
-              referenceType: 'TRUCK_STOCK_CHECK',
-              referenceId: String(check._id),
-              referenceCode: backup.code,
-              backupId: String(backup._id),
-              createdBy: actorId,
-              reason: dto.reason.trim(),
-            };
-          });
+        const changedProductIds = new Set([...before.keys(), ...after.keys()]),
+          movementRows = [...changedProductIds]
+            .filter(
+              (productId) =>
+                (before.get(productId) || 0) !== (after.get(productId) || 0),
+            )
+            .map((productId) => {
+              const quantityBefore = before.get(productId) || 0,
+                quantityAfter = after.get(productId) || 0,
+                delta = quantityAfter - quantityBefore;
+              return {
+                productId,
+                type:
+                  delta > 0
+                    ? InventoryMovementType.TRUCK_STOCK_CHECK_GAIN
+                    : InventoryMovementType.TRUCK_STOCK_CHECK_LOSS,
+                quantityChange: delta,
+                quantityBefore,
+                quantityAfter,
+                ...(delta > 0
+                  ? {
+                      destinationType: InventoryLocationType.TRUCK,
+                      destinationTruckId: truck._id,
+                    }
+                  : {
+                      sourceType: InventoryLocationType.TRUCK,
+                      sourceTruckId: truck._id,
+                    }),
+                referenceType: 'TRUCK_STOCK_CHECK',
+                referenceId: String(check._id),
+                referenceCode: backup.code,
+                backupId: String(backup._id),
+                createdBy: actorId,
+                reason: dto.reason.trim(),
+              };
+            });
         if (movementRows.length)
           await this.movements.insertMany(movementRows, { session });
         check.syncedAt = new Date();
@@ -363,6 +446,14 @@ export class TruckStockSyncService {
         check.syncReason = dto.reason.trim();
         check.syncIdempotencyKey = dto.idempotencyKey;
         check.backupId = String(backup._id);
+        check.deletedProductIds = deleteProductIds;
+        check.createdProductIds = (check.items || [])
+          .filter(
+            (item: any) =>
+              item.status === TruckStockCheckStatus.NOT_ON_TRUCK &&
+              Number(item.actualQuantity) > 0,
+          )
+          .map((item: any) => String(item.productId));
         await check.save({ session });
         await Promise.all([
           this.notifications.create(
@@ -406,6 +497,8 @@ export class TruckStockSyncService {
           backupId: String(backup._id),
           backupCode: backup.code,
           movements: movementRows.length,
+          productsCreated: check.createdProductIds.length,
+          productsDeleted: deleteProductIds.length,
           syncedAt: check.syncedAt,
         };
       });

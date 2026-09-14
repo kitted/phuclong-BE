@@ -7,6 +7,7 @@ export enum TruckStockCheckStatus {
   NOT_COUNTED = 'NOT_COUNTED',
   UNKNOWN = 'UNKNOWN',
   NOT_ON_TRUCK = 'NOT_ON_TRUCK',
+  MISSING_FROM_FILE = 'MISSING_FROM_FILE',
   INVALID = 'INVALID',
 }
 export class TruckStockCheckItem {
@@ -40,4 +41,6 @@ export class TruckStockChecks extends BaseModel {
   @prop() syncReason?: string;
   @prop() syncIdempotencyKey?: string;
   @prop() backupId?: string;
+  @prop({ type: () => [String], default: [] }) deletedProductIds?: string[];
+  @prop({ type: () => [String], default: [] }) createdProductIds?: string[];
 }

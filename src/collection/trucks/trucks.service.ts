@@ -891,10 +891,7 @@ export class TrucksService {
             context.destinationTruck,
           );
         for (const item of context.snapshots) {
-          sourceInventory.set(
-            String(item.productId),
-            item.sourceQuantityAfter,
-          );
+          sourceInventory.set(String(item.productId), item.sourceQuantityAfter);
           destinationInventory.set(
             String(item.productId),
             item.destinationQuantityAfter,
@@ -916,7 +913,10 @@ export class TrucksService {
             { session },
           ),
         ]);
-        if (sourceWrite.matchedCount !== 1 || destinationWrite.matchedCount !== 1)
+        if (
+          sourceWrite.matchedCount !== 1 ||
+          destinationWrite.matchedCount !== 1
+        )
           throw new ConflictException({
             code: 'TRUCK_STOCK_CHANGED',
             message:
@@ -2063,9 +2063,6 @@ export class TrucksService {
       } else if (!product && !truckItem) {
         status = TruckStockCheckStatus.UNKNOWN;
         note = note || 'Mã sản phẩm không tồn tại';
-      } else if (!truckItem) {
-        status = TruckStockCheckStatus.NOT_ON_TRUCK;
-        note = note || 'Sản phẩm không có trên xe';
       } else if (row.blank) {
         status = TruckStockCheckStatus.NOT_COUNTED;
       } else if (
@@ -2075,6 +2072,17 @@ export class TrucksService {
       ) {
         status = TruckStockCheckStatus.INVALID;
         note = note || 'Số lượng thực tế phải là số nguyên lớn hơn hoặc bằng 0';
+      } else if (!truckItem) {
+        actualQuantity = row.raw;
+        differenceQuantity = actualQuantity;
+        status = actualQuantity
+          ? TruckStockCheckStatus.NOT_ON_TRUCK
+          : TruckStockCheckStatus.MATCHED;
+        note =
+          note ||
+          (actualQuantity
+            ? 'Sản phẩm sẽ được thêm vào xe khi đồng bộ'
+            : 'Sản phẩm chưa có trên xe và số lượng thực tế bằng 0');
       } else {
         actualQuantity = row.raw;
         differenceQuantity = actualQuantity - truckItem.systemQuantity;
@@ -2102,16 +2110,19 @@ export class TrucksService {
       if (!seen.has(String(x.productCode).toUpperCase()))
         items.push({
           ...x,
-          status: TruckStockCheckStatus.NOT_COUNTED,
-          note: 'Không có dòng đối chiếu trong file',
+          status: TruckStockCheckStatus.MISSING_FROM_FILE,
+          note: 'Không có trong file; chỉ xóa khỏi xe khi admin đánh dấu',
         });
     const summary = {
-      totalProducts: context.rows.length,
+      totalProducts: items.filter(
+        (x) => x.status !== TruckStockCheckStatus.MISSING_FROM_FILE,
+      ).length,
       countedProducts: items.filter((x) =>
         [
           TruckStockCheckStatus.MATCHED,
           TruckStockCheckStatus.SHORTAGE,
           TruckStockCheckStatus.SURPLUS,
+          TruckStockCheckStatus.NOT_ON_TRUCK,
         ].includes(x.status),
       ).length,
       matchedProducts: items.filter(
@@ -2137,6 +2148,9 @@ export class TrucksService {
       ).length,
       notOnTruckProducts: items.filter(
         (x) => x.status === TruckStockCheckStatus.NOT_ON_TRUCK,
+      ).length,
+      missingFromFileProducts: items.filter(
+        (x) => x.status === TruckStockCheckStatus.MISSING_FROM_FILE,
       ).length,
       invalidRows: items.filter(
         (x) => x.status === TruckStockCheckStatus.INVALID,
@@ -2207,7 +2221,8 @@ export class TrucksService {
       SURPLUS: 'FFFCE4D6',
       NOT_COUNTED: 'FFE7E6E6',
       UNKNOWN: 'FFFFEB9C',
-      NOT_ON_TRUCK: 'FFFFEB9C',
+      NOT_ON_TRUCK: 'FFC6EFCE',
+      MISSING_FROM_FILE: 'FFE4D6F0',
       INVALID: 'FFFFC7CE',
     };
     for (let i = 2; i <= sheet.rowCount; i++) {
