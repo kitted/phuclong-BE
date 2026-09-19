@@ -13,23 +13,83 @@ describe('encrypted backup envelope', () => {
     process.env.BACKUP_SIGNING_KEY = 'test-signing-key';
   });
   afterAll(() => {
-    if (previousEncryption === undefined) delete process.env.BACKUP_ENCRYPTION_KEY; else process.env.BACKUP_ENCRYPTION_KEY = previousEncryption;
-    if (previousSigning === undefined) delete process.env.BACKUP_SIGNING_KEY; else process.env.BACKUP_SIGNING_KEY = previousSigning;
+    if (previousEncryption === undefined)
+      delete process.env.BACKUP_ENCRYPTION_KEY;
+    else process.env.BACKUP_ENCRYPTION_KEY = previousEncryption;
+    if (previousSigning === undefined) delete process.env.BACKUP_SIGNING_KEY;
+    else process.env.BACKUP_SIGNING_KEY = previousSigning;
   });
 
   it('round-trips MongoDB types through EJSON, gzip, encryption and signature', () => {
-    const service: any = new BackupsService({} as any, {} as any, new BackupLockService());
+    const service: any = new BackupsService(
+      {} as any,
+      {} as any,
+      new BackupLockService(),
+    );
     const id = new ObjectId();
-    const decoded = service.decode(service.encode({ id, at: new Date('2026-07-31T10:00:00.000Z') }));
+    const decoded = service.decode(
+      service.encode({ id, at: new Date('2026-07-31T10:00:00.000Z') }),
+    );
     expect(String(decoded.id)).toBe(String(id));
     expect(decoded.at).toEqual(new Date('2026-07-31T10:00:00.000Z'));
   });
 
   it('rejects a modified backup file', () => {
-    const service: any = new BackupsService({} as any, {} as any, new BackupLockService());
+    const service: any = new BackupsService(
+      {} as any,
+      {} as any,
+      new BackupLockService(),
+    );
     const file: Buffer = service.encode({ value: 1 });
     file[file.length - 1] ^= 1;
     expect(() => service.decode(file)).toThrow('checksum');
+  });
+
+  it('streams a compatible backup without loading a collection into an array', async () => {
+    const id = new ObjectId();
+    const cursor = {
+      async *[Symbol.asyncIterator]() {
+        yield { _id: id, name: 'Xe tải', createdAt: new Date('2026-09-19') };
+        yield { _id: new ObjectId(), name: 'Tồn kho' };
+      },
+      close: jest.fn().mockResolvedValue(undefined),
+    };
+    const collection = {
+      indexes: jest
+        .fn()
+        .mockResolvedValue([
+          { name: '_id_' },
+          { name: 'name_1', key: { name: 1 } },
+        ]),
+      find: jest.fn().mockReturnValue(cursor),
+    };
+    const connection = {
+      db: {
+        listCollections: jest.fn().mockReturnValue({
+          toArray: jest.fn().mockResolvedValue([{ name: 'items' }]),
+        }),
+        collection: jest.fn().mockReturnValue(collection),
+      },
+    };
+    const service: any = new BackupsService(
+      connection as any,
+      {} as any,
+      new BackupLockService(),
+    );
+
+    const result = await service.export(true);
+    const chunks: Buffer[] = [];
+    for await (const chunk of result.file) chunks.push(Buffer.from(chunk));
+    const decoded = service.decode(Buffer.concat(chunks));
+    await result.cleanup();
+
+    expect(collection.find).toHaveBeenCalledWith({}, { batchSize: 250 });
+    expect(cursor.close).toHaveBeenCalled();
+    expect(decoded.collections.items).toHaveLength(2);
+    expect(String(decoded.collections.items[0]._id)).toBe(String(id));
+    expect(decoded.manifest.collections).toEqual([
+      expect.objectContaining({ name: 'items', documents: 2 }),
+    ]);
   });
 });
 

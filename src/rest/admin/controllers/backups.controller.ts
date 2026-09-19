@@ -49,6 +49,7 @@ export class BackupsController {
     response.set({
       'Content-Type': 'application/octet-stream',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': String(result.sizeBytes),
     });
     return new StreamableFile(result.file);
   }
@@ -75,13 +76,17 @@ export class BackupsController {
   ) {
     if (dto.format && dto.format !== 'EJSON_GZIP')
       throw new BadRequestException('Định dạng backup không được hỗ trợ');
-    const file = await this.service.export(dto.includeAuditLogs !== false);
+    const result = await this.service.export(dto.includeAuditLogs !== false);
     const date = new Date().toISOString().slice(0, 10);
     response.set({
-      'Content-Type': 'application/gzip',
+      'Content-Type': 'application/octet-stream',
       'Content-Disposition': `attachment; filename="phuclong-backup-${date}.plbackup"`,
+      'Content-Length': String(result.sizeBytes),
     });
-    return new StreamableFile(file);
+    response.once('close', () => {
+      void result.cleanup();
+    });
+    return new StreamableFile(result.file);
   }
 
   @Post('inspect')

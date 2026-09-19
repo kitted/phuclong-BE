@@ -20,7 +20,13 @@ import {
   randomUUID,
   timingSafeEqual,
 } from 'crypto';
-import { gzipSync, gunzipSync } from 'zlib';
+import { createGzip, gzipSync, gunzipSync } from 'zlib';
+import { createReadStream, createWriteStream } from 'fs';
+import { mkdtemp, open, rm, stat, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import * as bcrypt from 'bcrypt';
 import { Users, UserStatus } from '../users/schemas/users.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
@@ -47,6 +53,13 @@ type RestoreJob = {
   actorId?: string;
 };
 type StoredBackup = { payload: any; checksumValid: boolean; expiresAt: Date };
+type GeneratedBackupFile = {
+  path: string;
+  directory: string;
+  sizeBytes: number;
+  checksum: string;
+  manifest: any;
+};
 
 @Injectable()
 export class BackupsService {
@@ -149,35 +162,128 @@ export class BackupsService {
       )
       .sort();
   }
-  private async snapshot(includeAuditLogs = true) {
-    const names = await this.collectionNames(includeAuditLogs);
-    const collections: Record<string, any[]> = {};
-    const indexes: Record<string, any[]> = {};
-    for (const name of names) {
-      collections[name] = await this.connection.db
-        .collection(name)
-        .find({})
-        .toArray();
-      indexes[name] = (
-        await this.connection.db.collection(name).indexes()
-      ).filter((index) => index.name !== '_id_');
+  private async fileHash(path: string, algorithm: 'sha256' | 'sha512') {
+    const hash = createHash(algorithm);
+    for await (const chunk of createReadStream(path)) hash.update(chunk);
+    return hash.digest('hex');
+  }
+
+  private async cleanupGeneratedFile(file?: GeneratedBackupFile) {
+    if (file?.directory)
+      await rm(file.directory, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+  }
+
+  private snapshotJsonStream(
+    names: string[],
+    includeAuditLogs: boolean,
+    state: { manifest?: any },
+  ) {
+    const database = this.connection.db,
+      schemaVersion = this.schemaVersion;
+    return Readable.from(
+      (async function* () {
+        const collections: any[] = [],
+          createdAt = new Date();
+        yield '{"collections":{';
+        for (
+          let collectionIndex = 0;
+          collectionIndex < names.length;
+          collectionIndex++
+        ) {
+          const name = names[collectionIndex],
+            collection = database.collection(name),
+            indexes = (await collection.indexes()).filter(
+              (index) => index.name !== '_id_',
+            );
+          if (collectionIndex) yield ',';
+          yield `${JSON.stringify(name)}:[`;
+          let documents = 0;
+          const cursor = collection.find({}, { batchSize: 250 });
+          try {
+            for await (const document of cursor) {
+              if (documents) yield ',';
+              yield EJSON.stringify(document, { relaxed: false });
+              documents++;
+            }
+          } finally {
+            await cursor.close().catch(() => undefined);
+          }
+          yield ']';
+          collections.push({ name, documents, indexes });
+        }
+        state.manifest = {
+          schemaVersion,
+          createdAt,
+          format: 'EJSON_GZIP_AES_256_GCM',
+          includeAuditLogs,
+          collections,
+          warnings: ['Ảnh Cloudinary không nằm trong file backup database.'],
+        };
+        yield `},"manifest":${EJSON.stringify(state.manifest, { relaxed: false })}}`;
+      })(),
+    );
+  }
+
+  private async generateBackupFile(
+    includeAuditLogs = true,
+  ): Promise<GeneratedBackupFile> {
+    const names = await this.collectionNames(includeAuditLogs),
+      directory = await mkdtemp(join(tmpdir(), 'phuclong-backup-')),
+      path = join(directory, 'backup.plbackup'),
+      iv = randomBytes(12),
+      header = Buffer.alloc(69),
+      state: { manifest?: any } = {};
+    Buffer.from('PLBACKUP2').copy(header, 0);
+    iv.copy(header, 41);
+    try {
+      await writeFile(path, header, { flag: 'wx' });
+      const cipher = createCipheriv(
+        'aes-256-gcm',
+        this.key('BACKUP_ENCRYPTION_KEY'),
+        iv,
+      );
+      await pipeline(
+        this.snapshotJsonStream(names, includeAuditLogs, state),
+        createGzip({ level: 6 }),
+        cipher,
+        createWriteStream(path, { flags: 'r+', start: 69 }),
+      );
+      const tag = cipher.getAuthTag(),
+        handle = await open(path, 'r+');
+      try {
+        await handle.write(tag, 0, tag.length, 53);
+      } finally {
+        await handle.close();
+      }
+      const signatureHash = createHmac(
+        'sha256',
+        this.key('BACKUP_SIGNING_KEY'),
+      );
+      for await (const chunk of createReadStream(path, { start: 41 }))
+        signatureHash.update(chunk);
+      const signature = signatureHash.digest(),
+        signatureHandle = await open(path, 'r+');
+      try {
+        await signatureHandle.write(signature, 0, signature.length, 9);
+      } finally {
+        await signatureHandle.close();
+      }
+      const fileStat = await stat(path);
+      return {
+        path,
+        directory,
+        sizeBytes: fileStat.size,
+        checksum: await this.fileHash(path, 'sha256'),
+        manifest: state.manifest,
+      };
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+      throw error;
     }
-    const createdAt = new Date();
-    return {
-      manifest: {
-        schemaVersion: this.schemaVersion,
-        createdAt,
-        format: 'EJSON_GZIP_AES_256_GCM',
-        includeAuditLogs,
-        collections: names.map((name) => ({
-          name,
-          documents: collections[name].length,
-          indexes: indexes[name],
-        })),
-        warnings: ['Ảnh Cloudinary không nằm trong file backup database.'],
-      },
-      collections,
-    };
   }
   private encode(payload: any) {
     const plain = gzipSync(
@@ -235,7 +341,18 @@ export class BackupsService {
     }
   }
   async export(includeAuditLogs = true) {
-    return this.encode(await this.snapshot(includeAuditLogs));
+    const generated = await this.generateBackupFile(includeAuditLogs),
+      file = createReadStream(generated.path);
+    let cleanupStarted = false;
+    const cleanup = () => {
+      if (cleanupStarted) return Promise.resolve();
+      cleanupStarted = true;
+      return this.cleanupGeneratedFile(generated);
+    };
+    file.once('close', () => {
+      void cleanup();
+    });
+    return { file, sizeBytes: generated.sizeBytes, cleanup };
   }
 
   private async nextSnapshotCode() {
@@ -251,13 +368,14 @@ export class BackupsService {
       );
     return `BK-${day.slice(2)}-${String(row?.sequence || 1).padStart(4, '0')}`;
   }
-  private async uploadFile(file: Buffer, filename: string, metadata: any) {
-    return new Promise<ObjectId>((resolve, reject) => {
-      const stream = this.bucket().openUploadStream(filename, { metadata });
-      stream.once('error', reject);
-      stream.once('finish', () => resolve(stream.id));
-      stream.end(file);
-    });
+  private async uploadGeneratedFile(
+    file: GeneratedBackupFile,
+    filename: string,
+    metadata: any,
+  ) {
+    const upload = this.bucket().openUploadStream(filename, { metadata });
+    await pipeline(createReadStream(file.path), upload);
+    return upload.id;
   }
   private async readFile(fileId: ObjectId) {
     return new Promise<Buffer>((resolve, reject) => {
@@ -267,6 +385,12 @@ export class BackupsService {
       stream.once('error', reject);
       stream.once('end', () => resolve(Buffer.concat(chunks)));
     });
+  }
+  private async gridFsHash(fileId: ObjectId) {
+    const hash = createHash('sha256');
+    for await (const chunk of this.bucket().openDownloadStream(fileId))
+      hash.update(chunk);
+    return hash.digest('hex');
   }
   private snapshotView(row: any) {
     return {
@@ -297,26 +421,25 @@ export class BackupsService {
     actorId?: string;
     actorName?: string;
   }) {
-    const payload: any = await this.snapshot(input.includeAuditLogs),
-      file = this.encode(payload),
-      checksum = createHash('sha256').update(file).digest('hex'),
-      code = await this.nextSnapshotCode(),
-      now = new Date();
-    const fileId = await this.uploadFile(file, `${code}.plbackup`, {
-      code,
-      sourceType: input.sourceType,
-      schemaVersion: this.schemaVersion,
-    });
-    const collectionCount = payload.manifest.collections.length,
-      collections = payload.manifest.collections.map((item) => ({
-        name: item.name,
-        documents: item.documents,
-      })),
-      documentCount = payload.manifest.collections.reduce(
-        (sum, item) => sum + item.documents,
-        0,
-      );
+    const code = await this.nextSnapshotCode(),
+      now = new Date(),
+      generated = await this.generateBackupFile(input.includeAuditLogs);
+    let fileId: ObjectId | undefined;
     try {
+      fileId = await this.uploadGeneratedFile(generated, `${code}.plbackup`, {
+        code,
+        sourceType: input.sourceType,
+        schemaVersion: this.schemaVersion,
+      });
+      const collectionCount = generated.manifest.collections.length,
+        collections = generated.manifest.collections.map((item) => ({
+          name: item.name,
+          documents: item.documents,
+        })),
+        documentCount = generated.manifest.collections.reduce(
+          (sum, item) => sum + item.documents,
+          0,
+        );
       const result = await this.metadata().insertOne({
         code,
         name: input.name,
@@ -327,12 +450,12 @@ export class BackupsService {
         updatedAt: now,
         createdBy: input.actorId,
         createdByName: input.actorName,
-        sizeBytes: file.length,
+        sizeBytes: generated.sizeBytes,
         schemaVersion: this.schemaVersion,
         collectionCount,
         collections,
         documentCount,
-        checksum,
+        checksum: generated.checksum,
         includeAuditLogs: input.includeAuditLogs,
         fileId,
       });
@@ -347,20 +470,23 @@ export class BackupsService {
           createdAt: now,
           createdBy: input.actorId,
           createdByName: input.actorName,
-          sizeBytes: file.length,
+          sizeBytes: generated.sizeBytes,
           schemaVersion: this.schemaVersion,
           collectionCount,
           documentCount,
-          checksum,
+          checksum: generated.checksum,
           includeAuditLogs: input.includeAuditLogs,
         }),
         fileId,
       };
     } catch (error) {
-      await this.bucket()
-        .delete(fileId)
-        .catch(() => undefined);
+      if (fileId)
+        await this.bucket()
+          .delete(fileId)
+          .catch(() => undefined);
       throw error;
+    } finally {
+      await this.cleanupGeneratedFile(generated);
     }
   }
   async createSnapshot(dto: any, actorId: string) {
@@ -448,8 +574,24 @@ export class BackupsService {
     return { row, file, payload, collections };
   }
   async downloadSnapshot(id: string) {
-    const { row, file } = await this.verifiedSnapshot(id);
-    return { file, filename: `${row.code}.plbackup` };
+    const row: any = await this.snapshotRecord(id);
+    if (row.status !== 'READY')
+      throw new ConflictException('Bản sao chưa sẵn sàng');
+    if (row.schemaVersion !== this.schemaVersion)
+      throw new BadRequestException({
+        code: 'BACKUP_SCHEMA_VERSION_UNSUPPORTED',
+        message: 'Phiên bản schema backup không được hỗ trợ',
+      });
+    if ((await this.gridFsHash(row.fileId)) !== row.checksum)
+      throw new BadRequestException({
+        code: 'BACKUP_CHECKSUM_INVALID',
+        message: 'Checksum bản sao không hợp lệ',
+      });
+    return {
+      file: this.bucket().openDownloadStream(row.fileId),
+      filename: `${row.code}.plbackup`,
+      sizeBytes: row.sizeBytes,
+    };
   }
   async previewSnapshotRestore(id: string) {
     const { row, collections } = await this.verifiedSnapshot(id);
@@ -598,11 +740,11 @@ export class BackupsService {
     this.jobs.set(job.id, job);
     this.restoreTokens.delete(token);
     await this.jobCollection().insertOne({ ...job, actorId });
-    setImmediate(() =>
-      this.run(job, stored.payload, dto.mode, { actorId }).catch(
+    setImmediate(() => {
+      void this.run(job, stored.payload, dto.mode, { actorId }).catch(
         () => undefined,
-      ),
-    );
+      );
+    });
     return {
       data: { jobId: job.id, status: job.status, progress: job.progress },
     };
@@ -677,13 +819,13 @@ export class BackupsService {
       reason: dto.reason,
       snapshotId: id,
     });
-    setImmediate(() =>
-      this.run(job, payload, 'REPLACE', {
+    setImmediate(() => {
+      void this.run(job, payload, 'REPLACE', {
         snapshotId: id,
         actorId,
         reason: dto.reason.trim(),
-      }).catch(() => undefined),
-    );
+      }).catch(() => undefined);
+    });
     return {
       data: { jobId: job.id, status: job.status, progress: job.progress },
     };
@@ -747,9 +889,8 @@ export class BackupsService {
     const suffix = `${Date.now()}_${job.id.replace(/-/g, '')}`;
     try {
       this.update(job, 'VALIDATING', 5, 'Đang kiểm tra dữ liệu');
-      const entries = Object.entries(payload.collections) as Array<
-        [string, any[]]
-      >;
+      const collections: Record<string, any[]> = payload.collections,
+        entries = Object.entries(collections);
       this.update(
         job,
         'CREATING_SAFETY_BACKUP',
@@ -929,7 +1070,12 @@ export class BackupsService {
         );
       this.update(job, 'COMPLETED', 100, 'Khôi phục dữ liệu thành công');
     } catch (error) {
-      job.error = error instanceof Error ? error.message : String(error);
+      job.error =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : 'Lỗi không xác định';
       this.update(job, 'FAILED', job.progress, 'Khôi phục dữ liệu thất bại');
       if (context.snapshotId && ObjectId.isValid(context.snapshotId))
         await this.metadata()
