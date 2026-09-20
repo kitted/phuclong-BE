@@ -92,14 +92,94 @@ describe('encrypted backup envelope', () => {
     ]);
 
     const generated = await service.generateBackupFile(true);
+    const uploadedFileId = new ObjectId(),
+      insertOne = jest.fn().mockResolvedValue({ insertedId: 'token' });
+    service.uploadRestoreFile = jest.fn().mockResolvedValue(uploadedFileId);
+    service.restoreSessions = jest.fn().mockReturnValue({ insertOne });
+    service.cleanupExpiredRestoreSessions = jest
+      .fn()
+      .mockResolvedValue(undefined);
     const inspection = await service.inspectFile(generated.path);
-    const stored = service.restoreTokens.get(inspection.data.restoreToken);
     expect(inspection.data.collections).toEqual([
       expect.objectContaining({ name: 'items', documents: 2 }),
     ]);
-    clearTimeout(stored.expiryTimer);
-    service.restoreTokens.delete(inspection.data.restoreToken);
+    expect(service.uploadRestoreFile).toHaveBeenCalled();
+    expect(insertOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: inspection.data.restoreToken,
+        status: 'READY',
+        fileId: uploadedFileId,
+      }),
+    );
     await service.cleanupGeneratedFile(generated);
+  });
+
+  it('resolves a restore token from MongoDB after local process state is lost', async () => {
+    const service: any = new BackupsService(
+        {} as any,
+        {} as any,
+        new BackupLockService(),
+      ),
+      fileId = new ObjectId(),
+      session = {
+        _id: 'persisted-token',
+        status: 'READY',
+        fileId,
+        manifest: { schemaVersion: '2.0.0', collections: [] },
+        checksumValid: true,
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+      sessions = {
+        findOne: jest.fn().mockResolvedValue(session),
+        findOneAndUpdate: jest.fn().mockResolvedValue({
+          ...session,
+          status: 'CLAIMED',
+        }),
+        updateOne: jest.fn(),
+      };
+    service.restoreSessions = jest.fn().mockReturnValue(sessions);
+    service.verifyAdmin = jest.fn().mockResolvedValue(undefined);
+    service.jobCollection = jest.fn().mockReturnValue({
+      findOne: jest.fn().mockResolvedValue(null),
+      insertOne: jest.fn().mockResolvedValue({}),
+    });
+    service.materializeRestoreFile = jest.fn().mockResolvedValue({
+      path: '/tmp/persisted-token.plbackup',
+      directory: '/tmp/persisted-token',
+    });
+    service.run = jest.fn().mockResolvedValue(undefined);
+
+    const result = await service.startRestore(
+      'persisted-token',
+      {
+        mode: 'REPLACE',
+        confirmation: 'KHOI PHUC DU LIEU',
+        currentPassword: 'secret',
+      },
+      String(new ObjectId()),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(result.data.status).toBe('PENDING');
+    expect(sessions.findOne).toHaveBeenCalled();
+    expect(sessions.findOneAndUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        _id: 'persisted-token',
+        status: 'READY',
+      }),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(service.run).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        fileId,
+        restoreToken: 'persisted-token',
+        filePath: '/tmp/persisted-token.plbackup',
+      }),
+      'REPLACE',
+      expect.anything(),
+    );
   });
 });
 

@@ -59,8 +59,10 @@ type RestoreJob = {
 type StoredBackup = {
   payload?: any;
   filePath?: string;
+  directory?: string;
+  fileId?: ObjectId;
+  restoreToken?: string;
   manifest?: any;
-  expiryTimer?: NodeJS.Timeout;
   checksumValid: boolean;
   expiresAt: Date;
 };
@@ -92,6 +94,14 @@ export class BackupsService {
     return new GridFSBucket(this.backupDb(), {
       bucketName: 'system_snapshots',
     });
+  }
+  private restoreBucket() {
+    return new GridFSBucket(this.backupDb(), {
+      bucketName: 'restore_uploads',
+    });
+  }
+  private restoreSessions() {
+    return this.backupDb().collection<any>('restore_sessions');
   }
   private metadata() {
     return this.backupDb().collection('snapshot_metadata');
@@ -531,6 +541,65 @@ export class BackupsService {
     await pipeline(createReadStream(file.path), upload);
     return upload.id;
   }
+  private async uploadRestoreFile(
+    path: string,
+    filename: string,
+    metadata: any,
+  ) {
+    const upload = this.restoreBucket().openUploadStream(filename, {
+      metadata,
+    });
+    await pipeline(createReadStream(path), upload);
+    return upload.id;
+  }
+  private async materializeRestoreFile(fileId: ObjectId, token: string) {
+    const directory = await mkdtemp(join(tmpdir(), 'phuclong-restore-')),
+      path = join(directory, `${token}.plbackup`);
+    try {
+      await pipeline(
+        this.restoreBucket().openDownloadStream(fileId),
+        createWriteStream(path, { flags: 'wx' }),
+      );
+      return { path, directory };
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+      throw error;
+    }
+  }
+  private async deleteRestoreSession(token: string, fileId?: ObjectId) {
+    if (fileId)
+      await this.restoreBucket()
+        .delete(fileId)
+        .catch(() => undefined);
+    await this.restoreSessions()
+      .deleteOne({ _id: token })
+      .catch(() => undefined);
+    this.restoreTokens.delete(token);
+  }
+  private async cleanupRestoreSource(source: any) {
+    if (source?.directory)
+      await rm(source.directory, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+    else if (source?.filePath)
+      await unlink(source.filePath).catch(() => undefined);
+    if (source?.restoreToken)
+      await this.deleteRestoreSession(source.restoreToken, source.fileId);
+  }
+  private async cleanupExpiredRestoreSessions() {
+    const expired = await this.restoreSessions()
+      .find({ expiresAt: { $lte: new Date() } })
+      .project({ fileId: 1 })
+      .limit(20)
+      .toArray();
+    for (const session of expired)
+      await this.deleteRestoreSession(
+        String(session._id),
+        session.fileId as ObjectId,
+      );
+  }
   private async readFile(fileId: ObjectId) {
     return new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = [];
@@ -844,6 +913,7 @@ export class BackupsService {
     };
   }
   async inspectFile(path: string) {
+    let uploadedFileId: ObjectId | undefined, restoreToken: string | undefined;
     try {
       const counts = new Map<string, number>(),
         manifest = await this.parseBackupStream(path, {
@@ -872,24 +942,24 @@ export class BackupsService {
           throw new BadRequestException(
             `Số lượng document trong manifest không khớp tại ${item.name}: ${counts.get(item.name) || 0}/${item.documents}`,
           );
-      const restoreToken = randomUUID(),
-        expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-      const stored: StoredBackup = {
-        filePath: path,
+      restoreToken = randomUUID();
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      uploadedFileId = await this.uploadRestoreFile(
+        path,
+        `${restoreToken}.plbackup`,
+        { restoreToken, expiresAt, schemaVersion: manifest.schemaVersion },
+      );
+      await this.restoreSessions().insertOne({
+        _id: restoreToken,
+        status: 'READY',
+        fileId: uploadedFileId,
         manifest,
         checksumValid: true,
         expiresAt,
-      };
-      this.restoreTokens.set(restoreToken, stored);
-      const expiryTimer = setTimeout(
-        () => {
-          this.restoreTokens.delete(restoreToken);
-          void unlink(path).catch(() => undefined);
-        },
-        60 * 60 * 1000,
-      );
-      expiryTimer.unref();
-      stored.expiryTimer = expiryTimer;
+        createdAt: new Date(),
+      });
+      await unlink(path).catch(() => undefined);
+      void this.cleanupExpiredRestoreSessions().catch(() => undefined);
       return {
         data: {
           restoreToken,
@@ -905,6 +975,12 @@ export class BackupsService {
         },
       };
     } catch (error) {
+      if (uploadedFileId && restoreToken)
+        await this.deleteRestoreSession(restoreToken, uploadedFileId);
+      else if (uploadedFileId)
+        await this.restoreBucket()
+          .delete(uploadedFileId)
+          .catch(() => undefined);
       await unlink(path).catch(() => undefined);
       throw error;
     }
@@ -927,11 +1003,22 @@ export class BackupsService {
       throw new ForbiddenException('Mật khẩu quản trị viên không chính xác');
   }
   async startRestore(token: string, dto: any, actorId: string) {
-    const stored = this.restoreTokens.get(token);
+    let stored = this.restoreTokens.get(token),
+      persisted: any;
+    if (!stored) {
+      persisted = await this.restoreSessions().findOne({ _id: token } as any);
+      if (persisted)
+        stored = {
+          fileId: persisted.fileId,
+          restoreToken: token,
+          manifest: persisted.manifest,
+          checksumValid: persisted.checksumValid,
+          expiresAt: persisted.expiresAt,
+        };
+    }
     if (!stored || stored.expiresAt <= new Date()) {
-      this.restoreTokens.delete(token);
-      if (stored?.filePath)
-        await unlink(stored.filePath).catch(() => undefined);
+      if (stored?.fileId) await this.deleteRestoreSession(token, stored.fileId);
+      else this.restoreTokens.delete(token);
       throw new NotFoundException(
         'Restore token không tồn tại hoặc đã hết hạn',
       );
@@ -959,9 +1046,43 @@ export class BackupsService {
       createdAt: new Date(),
       updatedAt: new Date(),
     };
+    if (persisted) {
+      const claimed: any = await this.restoreSessions().findOneAndUpdate(
+        {
+          _id: token,
+          status: 'READY',
+          expiresAt: { $gt: new Date() },
+        } as any,
+        {
+          $set: {
+            status: 'CLAIMED',
+            jobId: job.id,
+            claimedAt: new Date(),
+          },
+        },
+        { returnDocument: 'after' },
+      );
+      if (!claimed)
+        throw new ConflictException(
+          'Phiên restore đã được sử dụng hoặc đang được xử lý',
+        );
+      try {
+        const materialized = await this.materializeRestoreFile(
+          stored.fileId,
+          token,
+        );
+        stored.filePath = materialized.path;
+        stored.directory = materialized.directory;
+      } catch (error) {
+        await this.restoreSessions().updateOne(
+          { _id: token, jobId: job.id } as any,
+          { $set: { status: 'READY' }, $unset: { jobId: '', claimedAt: '' } },
+        );
+        throw error;
+      }
+    }
     this.jobs.set(job.id, job);
     this.restoreTokens.delete(token);
-    if (stored.expiryTimer) clearTimeout(stored.expiryTimer);
     await this.jobCollection().insertOne({ ...job, actorId });
     setImmediate(() => {
       void this.run(job, stored, dto.mode, { actorId }).catch(() => undefined);
@@ -1255,11 +1376,13 @@ export class BackupsService {
         0,
         'Hệ thống đang bị khóa bởi tiến trình khác',
       );
+      await this.cleanupRestoreSource(source);
       return;
     }
     if (!(await this.acquireDistributedRestoreLock(job.id))) {
       this.lock.unlock();
       this.update(job, 'FAILED', 0, 'Một tiến trình restore khác đang chạy');
+      await this.cleanupRestoreSource(source);
       return;
     }
     const suffix = `${Date.now()}_${job.id.replace(/-/g, '')}`;
@@ -1482,8 +1605,7 @@ export class BackupsService {
           )
           .catch(() => undefined);
     } finally {
-      if (source?.filePath)
-        await unlink(source.filePath).catch(() => undefined);
+      await this.cleanupRestoreSource(source);
       await this.releaseDistributedRestoreLock(job.id);
       this.lock.unlock();
     }
