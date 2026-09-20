@@ -903,67 +903,45 @@ export class BackupsService {
       },
     };
   }
-  async inspectFile(path: string) {
-    let uploadedFileId: ObjectId | undefined, restoreToken: string | undefined;
-    try {
-      const counts = new Map<string, number>(),
-        manifest = await this.parseBackupStream(path, {
-          collectionStart: (name) => {
-            counts.set(name, 0);
-          },
-          document: (name) => {
-            counts.set(name, (counts.get(name) || 0) + 1);
-          },
-        });
-      if (manifest.schemaVersion !== this.schemaVersion)
-        throw new BadRequestException({
-          code: 'BACKUP_SCHEMA_VERSION_UNSUPPORTED',
-          message: 'Phiên bản schema backup không được hỗ trợ',
-        });
-      const names = [...counts.keys()];
-      if (names.some((name) => !this.allowedName(name)))
-        throw new BadRequestException('File chứa collection không được phép');
-      const allowedCollections = new Set(await this.collectionNames(true));
-      if (names.some((name) => !allowedCollections.has(name)))
-        throw new BadRequestException(
-          'File chứa collection ngoài allowlist của ứng dụng',
-        );
-      for (const item of manifest.collections || [])
-        if (counts.get(item.name) !== item.documents)
-          throw new BadRequestException(
-            `Số lượng document trong manifest không khớp tại ${item.name}: ${counts.get(item.name) || 0}/${item.documents}`,
-          );
-      restoreToken = randomUUID();
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-      uploadedFileId = await this.uploadRestoreFile(
-        path,
-        `${restoreToken}.plbackup`,
-        {
-          restoreToken,
-          expiresAt,
-          schemaVersion: manifest.schemaVersion,
-          manifest,
+  private async validateBackupFile(path: string) {
+    const counts = new Map<string, number>(),
+      manifest = await this.parseBackupStream(path, {
+        collectionStart: (name) => {
+          counts.set(name, 0);
         },
-      );
-      await this.restoreSessions().insertOne({
-        _id: restoreToken,
-        status: 'READY',
-        fileId: uploadedFileId,
-        manifest,
-        checksumValid: true,
-        expiresAt,
-        createdAt: new Date(),
+        document: (name) => {
+          counts.set(name, (counts.get(name) || 0) + 1);
+        },
       });
-      await unlink(path).catch(() => undefined);
+    if (manifest.schemaVersion !== this.schemaVersion)
+      throw new BadRequestException({
+        code: 'BACKUP_SCHEMA_VERSION_UNSUPPORTED',
+        message: 'Phiên bản schema backup không được hỗ trợ',
+      });
+    const names = [...counts.keys()];
+    if (names.some((name) => !this.allowedName(name)))
+      throw new BadRequestException('File chứa collection không được phép');
+    const allowedCollections = new Set(await this.collectionNames(true));
+    if (names.some((name) => !allowedCollections.has(name)))
+      throw new BadRequestException(
+        'File chứa collection ngoài allowlist của ứng dụng',
+      );
+    for (const item of manifest.collections || [])
+      if (counts.get(item.name) !== item.documents)
+        throw new BadRequestException(
+          `Số lượng document trong manifest không khớp tại ${item.name}: ${counts.get(item.name) || 0}/${item.documents}`,
+        );
+    return manifest;
+  }
+  async inspectFile(path: string) {
+    try {
+      const manifest = await this.validateBackupFile(path);
       return {
         data: {
-          restoreToken,
           checksumValid: true,
           createdAt: manifest.createdAt,
           schemaVersion: manifest.schemaVersion,
-          expiresAt,
-          storageDatabase: this.backupDb().databaseName,
-          persisted: true,
+          persisted: false,
           collections: manifest.collections.map((item) => ({
             name: item.name,
             documents: item.documents,
@@ -971,15 +949,8 @@ export class BackupsService {
           warnings: manifest.warnings || [],
         },
       };
-    } catch (error) {
-      if (uploadedFileId && restoreToken)
-        await this.deleteRestoreSession(restoreToken, uploadedFileId);
-      else if (uploadedFileId)
-        await this.restoreBucket()
-          .delete(uploadedFileId)
-          .catch(() => undefined);
+    } finally {
       await unlink(path).catch(() => undefined);
-      throw error;
     }
   }
   private async verifyAdmin(actorId: string, password: string) {
@@ -998,6 +969,55 @@ export class BackupsService {
       !(await bcrypt.compare(password, admin.password))
     )
       throw new ForbiddenException('Mật khẩu quản trị viên không chính xác');
+  }
+  async startRestoreFile(path: string, dto: any, actorId: string) {
+    let handedOff = false;
+    try {
+      if (!['REPLACE', 'MERGE'].includes(dto.mode))
+        throw new BadRequestException('Chế độ restore không hợp lệ');
+      if (dto.confirmation !== 'KHOI PHUC DU LIEU')
+        throw new BadRequestException('Chuỗi xác nhận không chính xác');
+      await this.verifyAdmin(actorId, dto.currentPassword);
+      if (
+        [...this.jobs.values()].some(
+          (job) => !['COMPLETED', 'FAILED'].includes(job.status),
+        ) ||
+        (await this.jobCollection().findOne({
+          status: { $nin: ['COMPLETED', 'FAILED'] },
+          updatedAt: { $gt: new Date(Date.now() - 6 * 60 * 60 * 1000) },
+        }))
+      )
+        throw new ConflictException('Một tiến trình restore khác đang chạy');
+      const manifest = await this.validateBackupFile(path),
+        job: RestoreJob = {
+          id: randomUUID(),
+          status: 'PENDING',
+          progress: 0,
+          message: 'Đang chờ xử lý',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          actorId,
+        },
+        source: StoredBackup = {
+          filePath: path,
+          manifest,
+          checksumValid: true,
+          expiresAt: new Date(8640000000000000),
+        };
+      this.jobs.set(job.id, job);
+      await this.jobCollection().insertOne({ ...job, actorId });
+      handedOff = true;
+      setImmediate(() => {
+        void this.run(job, source, dto.mode, { actorId }).catch(
+          () => undefined,
+        );
+      });
+      return {
+        data: { jobId: job.id, status: job.status, progress: job.progress },
+      };
+    } finally {
+      if (!handedOff) await unlink(path).catch(() => undefined);
+    }
   }
   async startRestore(token: string, dto: any, actorId: string) {
     let stored = this.restoreTokens.get(token),

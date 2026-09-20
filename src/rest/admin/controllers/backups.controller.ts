@@ -22,6 +22,15 @@ import { WarehouseController } from '../decorators/warehouse';
 import { BackupsService } from '../../../collection/backups/backups.service';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
 
+const backupUploadInterceptor = FileInterceptor('file', {
+  storage: diskStorage({
+    destination: tmpdir(),
+    filename: (_request, _file, callback) =>
+      callback(null, `phuclong-upload-${randomUUID()}.plbackup`),
+  }),
+  limits: { files: 1, fileSize: 512 * 1024 * 1024 },
+});
+
 @WarehouseController(['backups'])
 @AdminOnly()
 export class BackupsController {
@@ -93,28 +102,21 @@ export class BackupsController {
   }
 
   @Post('inspect')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: diskStorage({
-        destination: tmpdir(),
-        filename: (_request, _file, callback) =>
-          callback(null, `phuclong-upload-${randomUUID()}.plbackup`),
-      }),
-      limits: { files: 1, fileSize: 512 * 1024 * 1024 },
-    }),
-  )
+  @UseInterceptors(backupUploadInterceptor)
   inspect(@UploadedFile() file: any) {
     if (!file?.path) throw new BadRequestException('Vui lòng chọn file backup');
     return this.service.inspectFile(file.path);
   }
 
-  @Post(':restoreToken/restore')
-  restore(
-    @Param('restoreToken') token: string,
+  @Post('restore')
+  @UseInterceptors(backupUploadInterceptor)
+  restoreFile(
+    @UploadedFile() file: any,
     @Body() dto: any,
     @Req() request: AuthRequest,
   ) {
-    return this.service.startRestore(token, dto, this.actorId(request));
+    if (!file?.path) throw new BadRequestException('Vui lòng chọn file backup');
+    return this.service.startRestoreFile(file.path, dto, this.actorId(request));
   }
 
   @Get('jobs/:jobId') restoreJob(@Param('jobId') id: string) {

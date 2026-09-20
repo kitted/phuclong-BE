@@ -92,25 +92,12 @@ describe('encrypted backup envelope', () => {
     ]);
 
     const generated = await service.generateBackupFile(true);
-    const uploadedFileId = new ObjectId(),
-      insertOne = jest.fn().mockResolvedValue({ insertedId: 'token' });
-    service.uploadRestoreFile = jest.fn().mockResolvedValue(uploadedFileId);
-    service.backupDb = jest
-      .fn()
-      .mockReturnValue({ databaseName: 'test_backups' });
-    service.restoreSessions = jest.fn().mockReturnValue({ insertOne });
     const inspection = await service.inspectFile(generated.path);
     expect(inspection.data.collections).toEqual([
       expect.objectContaining({ name: 'items', documents: 2 }),
     ]);
-    expect(service.uploadRestoreFile).toHaveBeenCalled();
-    expect(insertOne).toHaveBeenCalledWith(
-      expect.objectContaining({
-        _id: inspection.data.restoreToken,
-        status: 'READY',
-        fileId: uploadedFileId,
-      }),
-    );
+    expect(inspection.data.persisted).toBe(false);
+    expect(inspection.data.restoreToken).toBeUndefined();
     await service.cleanupGeneratedFile(generated);
   });
 
@@ -193,6 +180,46 @@ describe('encrypted backup envelope', () => {
         fileId,
         restoreToken: 'persisted-token',
         filePath: '/tmp/persisted-token.plbackup',
+      }),
+      'REPLACE',
+      expect.anything(),
+    );
+  });
+
+  it('starts restore directly from the uploaded file without a restore token', async () => {
+    const service: any = new BackupsService(
+      {} as any,
+      {} as any,
+      new BackupLockService(),
+    );
+    service.verifyAdmin = jest.fn().mockResolvedValue(undefined);
+    service.validateBackupFile = jest.fn().mockResolvedValue({
+      schemaVersion: '2.0.0',
+      collections: [],
+    });
+    service.jobCollection = jest.fn().mockReturnValue({
+      findOne: jest.fn().mockResolvedValue(null),
+      insertOne: jest.fn().mockResolvedValue({}),
+    });
+    service.run = jest.fn().mockResolvedValue(undefined);
+
+    const result = await service.startRestoreFile(
+      '/tmp/direct-restore.plbackup',
+      {
+        mode: 'REPLACE',
+        confirmation: 'KHOI PHUC DU LIEU',
+        currentPassword: 'secret',
+      },
+      String(new ObjectId()),
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(result.data.status).toBe('PENDING');
+    expect(service.run).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        filePath: '/tmp/direct-restore.plbackup',
+        manifest: expect.objectContaining({ schemaVersion: '2.0.0' }),
       }),
       'REPLACE',
       expect.anything(),
