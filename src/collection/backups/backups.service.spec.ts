@@ -99,9 +99,6 @@ describe('encrypted backup envelope', () => {
       .fn()
       .mockReturnValue({ databaseName: 'test_backups' });
     service.restoreSessions = jest.fn().mockReturnValue({ insertOne });
-    service.cleanupExpiredRestoreSessions = jest
-      .fn()
-      .mockResolvedValue(undefined);
     const inspection = await service.inspectFile(generated.path);
     expect(inspection.data.collections).toEqual([
       expect.objectContaining({ name: 'items', documents: 2 }),
@@ -117,7 +114,7 @@ describe('encrypted backup envelope', () => {
     await service.cleanupGeneratedFile(generated);
   });
 
-  it('recovers a restore token from GridFS when the session collection is empty', async () => {
+  it('restores from GridFS without rejecting an expired restore token', async () => {
     const service: any = new BackupsService(
         {} as any,
         {} as any,
@@ -130,7 +127,7 @@ describe('encrypted backup envelope', () => {
         fileId,
         manifest: { schemaVersion: '2.0.0', collections: [] },
         checksumValid: true,
-        expiresAt: new Date(Date.now() + 60_000),
+        expiresAt: new Date(Date.now() - 60_000),
       },
       sessions = {
         findOne: jest.fn().mockResolvedValue(null),

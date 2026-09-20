@@ -591,18 +591,6 @@ export class BackupsService {
     if (source?.restoreToken)
       await this.deleteRestoreSession(source.restoreToken, source.fileId);
   }
-  private async cleanupExpiredRestoreSessions() {
-    const expired = await this.restoreSessions()
-      .find({ expiresAt: { $lte: new Date() } })
-      .project({ fileId: 1 })
-      .limit(20)
-      .toArray();
-    for (const session of expired)
-      await this.deleteRestoreSession(
-        String(session._id),
-        session.fileId as ObjectId,
-      );
-  }
   private async readFile(fileId: ObjectId) {
     return new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = [];
@@ -967,7 +955,6 @@ export class BackupsService {
         createdAt: new Date(),
       });
       await unlink(path).catch(() => undefined);
-      void this.cleanupExpiredRestoreSessions().catch(() => undefined);
       return {
         data: {
           restoreToken,
@@ -1020,7 +1007,6 @@ export class BackupsService {
       if (!persisted) {
         const gridFile = await this.restoreFiles().findOne({
           'metadata.restoreToken': token,
-          'metadata.expiresAt': { $gt: new Date() },
         });
         if (gridFile?.metadata?.manifest) {
           persisted = {
@@ -1049,13 +1035,11 @@ export class BackupsService {
           expiresAt: persisted.expiresAt,
         };
     }
-    if (!stored || stored.expiresAt <= new Date()) {
-      if (stored?.fileId) await this.deleteRestoreSession(token, stored.fileId);
-      else this.restoreTokens.delete(token);
+    if (!stored) {
       throw new NotFoundException({
-        code: 'RESTORE_TOKEN_NOT_FOUND',
+        code: 'RESTORE_FILE_NOT_FOUND',
         message:
-          'Restore token không tồn tại trong kho backup hoặc đã hết hạn. Vui lòng kiểm tra lại file để tạo phiên mới.',
+          'Không tìm thấy file backup tương ứng trong kho lưu trữ. Vui lòng tải file lên lại.',
         storageDatabase: this.backupDb().databaseName,
       });
     }
@@ -1087,7 +1071,6 @@ export class BackupsService {
         {
           _id: token,
           status: 'READY',
-          expiresAt: { $gt: new Date() },
         } as any,
         {
           $set: {

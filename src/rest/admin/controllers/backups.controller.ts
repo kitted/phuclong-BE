@@ -14,9 +14,9 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
+import { randomUUID } from 'crypto';
 import { diskStorage } from 'multer';
 import { tmpdir } from 'os';
-import { randomUUID } from 'crypto';
 import { AdminOnly } from '../decorators/admin-only';
 import { WarehouseController } from '../decorators/warehouse';
 import { BackupsService } from '../../../collection/backups/backups.service';
@@ -44,18 +44,6 @@ export class BackupsController {
   @Get('snapshots/:id') snapshot(@Param('id') id: string) {
     return this.service.getSnapshot(id);
   }
-  @Get('snapshots/:id/download') async downloadSnapshot(
-    @Param('id') id: string,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const result = await this.service.downloadSnapshot(id);
-    response.set({
-      'Content-Type': 'application/octet-stream',
-      'Content-Disposition': `attachment; filename="${result.filename}"`,
-      'Content-Length': String(result.sizeBytes),
-    });
-    return new StreamableFile(result.file);
-  }
   @Post('snapshots/:id/restore/preview') previewSnapshotRestore(
     @Param('id') id: string,
   ) {
@@ -67,6 +55,18 @@ export class BackupsController {
     @Req() request: AuthRequest,
   ) {
     return this.service.startSnapshotRestore(id, dto, this.actorId(request));
+  }
+  @Get('snapshots/:id/download') async downloadSnapshot(
+    @Param('id') id: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.service.downloadSnapshot(id);
+    response.set({
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': String(result.sizeBytes),
+    });
+    return new StreamableFile(result.file);
   }
   @Delete('snapshots/:id') deleteSnapshot(@Param('id') id: string) {
     return this.service.deleteSnapshot(id);
@@ -117,8 +117,7 @@ export class BackupsController {
     return this.service.startRestore(token, dto, this.actorId(request));
   }
 
-  @Get('jobs/:jobId')
-  job(@Param('jobId') id: string) {
+  @Get('jobs/:jobId') restoreJob(@Param('jobId') id: string) {
     return this.service.getJob(id);
   }
 }
