@@ -95,6 +95,9 @@ describe('encrypted backup envelope', () => {
     const uploadedFileId = new ObjectId(),
       insertOne = jest.fn().mockResolvedValue({ insertedId: 'token' });
     service.uploadRestoreFile = jest.fn().mockResolvedValue(uploadedFileId);
+    service.backupDb = jest
+      .fn()
+      .mockReturnValue({ databaseName: 'test_backups' });
     service.restoreSessions = jest.fn().mockReturnValue({ insertOne });
     service.cleanupExpiredRestoreSessions = jest
       .fn()
@@ -114,7 +117,7 @@ describe('encrypted backup envelope', () => {
     await service.cleanupGeneratedFile(generated);
   });
 
-  it('resolves a restore token from MongoDB after local process state is lost', async () => {
+  it('recovers a restore token from GridFS when the session collection is empty', async () => {
     const service: any = new BackupsService(
         {} as any,
         {} as any,
@@ -130,14 +133,25 @@ describe('encrypted backup envelope', () => {
         expiresAt: new Date(Date.now() + 60_000),
       },
       sessions = {
-        findOne: jest.fn().mockResolvedValue(session),
+        findOne: jest.fn().mockResolvedValue(null),
         findOneAndUpdate: jest.fn().mockResolvedValue({
           ...session,
           status: 'CLAIMED',
         }),
-        updateOne: jest.fn(),
+        updateOne: jest.fn().mockResolvedValue({ upsertedCount: 1 }),
       };
     service.restoreSessions = jest.fn().mockReturnValue(sessions);
+    service.restoreFiles = jest.fn().mockReturnValue({
+      findOne: jest.fn().mockResolvedValue({
+        _id: fileId,
+        uploadDate: new Date(),
+        metadata: {
+          restoreToken: 'persisted-token',
+          expiresAt: session.expiresAt,
+          manifest: session.manifest,
+        },
+      }),
+    });
     service.verifyAdmin = jest.fn().mockResolvedValue(undefined);
     service.jobCollection = jest.fn().mockReturnValue({
       findOne: jest.fn().mockResolvedValue(null),
@@ -162,6 +176,12 @@ describe('encrypted backup envelope', () => {
 
     expect(result.data.status).toBe('PENDING');
     expect(sessions.findOne).toHaveBeenCalled();
+    expect(service.restoreFiles().findOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        'metadata.restoreToken': 'persisted-token',
+      }),
+    );
+    expect(sessions.updateOne).toHaveBeenCalled();
     expect(sessions.findOneAndUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         _id: 'persisted-token',

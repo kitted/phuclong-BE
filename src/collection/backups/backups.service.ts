@@ -103,6 +103,9 @@ export class BackupsService {
   private restoreSessions() {
     return this.backupDb().collection<any>('restore_sessions');
   }
+  private restoreFiles() {
+    return this.backupDb().collection<any>('restore_uploads.files');
+  }
   private metadata() {
     return this.backupDb().collection('snapshot_metadata');
   }
@@ -947,7 +950,12 @@ export class BackupsService {
       uploadedFileId = await this.uploadRestoreFile(
         path,
         `${restoreToken}.plbackup`,
-        { restoreToken, expiresAt, schemaVersion: manifest.schemaVersion },
+        {
+          restoreToken,
+          expiresAt,
+          schemaVersion: manifest.schemaVersion,
+          manifest,
+        },
       );
       await this.restoreSessions().insertOne({
         _id: restoreToken,
@@ -967,6 +975,8 @@ export class BackupsService {
           createdAt: manifest.createdAt,
           schemaVersion: manifest.schemaVersion,
           expiresAt,
+          storageDatabase: this.backupDb().databaseName,
+          persisted: true,
           collections: manifest.collections.map((item) => ({
             name: item.name,
             documents: item.documents,
@@ -1007,6 +1017,29 @@ export class BackupsService {
       persisted: any;
     if (!stored) {
       persisted = await this.restoreSessions().findOne({ _id: token } as any);
+      if (!persisted) {
+        const gridFile = await this.restoreFiles().findOne({
+          'metadata.restoreToken': token,
+          'metadata.expiresAt': { $gt: new Date() },
+        });
+        if (gridFile?.metadata?.manifest) {
+          persisted = {
+            _id: token,
+            status: 'READY',
+            fileId: gridFile._id,
+            manifest: gridFile.metadata.manifest,
+            checksumValid: true,
+            expiresAt: gridFile.metadata.expiresAt,
+            createdAt: gridFile.uploadDate || new Date(),
+            recoveredFromGridFs: true,
+          };
+          await this.restoreSessions().updateOne(
+            { _id: token },
+            { $setOnInsert: persisted },
+            { upsert: true },
+          );
+        }
+      }
       if (persisted)
         stored = {
           fileId: persisted.fileId,
@@ -1019,9 +1052,12 @@ export class BackupsService {
     if (!stored || stored.expiresAt <= new Date()) {
       if (stored?.fileId) await this.deleteRestoreSession(token, stored.fileId);
       else this.restoreTokens.delete(token);
-      throw new NotFoundException(
-        'Restore token không tồn tại hoặc đã hết hạn',
-      );
+      throw new NotFoundException({
+        code: 'RESTORE_TOKEN_NOT_FOUND',
+        message:
+          'Restore token không tồn tại trong kho backup hoặc đã hết hạn. Vui lòng kiểm tra lại file để tạo phiên mới.',
+        storageDatabase: this.backupDb().databaseName,
+      });
     }
     if (!['REPLACE', 'MERGE'].includes(dto.mode))
       throw new BadRequestException('Chế độ restore không hợp lệ');
