@@ -1403,6 +1403,20 @@ export class BackupsService {
           .catch(() => undefined);
     }
   }
+  private async verifyRestoredCollections(manifest: any, mode: RestoreMode) {
+    if (mode !== 'REPLACE') return;
+    for (const expected of manifest.collections || []) {
+      const actual = await this.connection.db
+        .collection(expected.name)
+        .countDocuments();
+      // Staging đã được kiểm tra bằng tuyệt đối trước khi swap. Sau swap,
+      // audit/notification hợp lệ có thể được ghi đồng thời nên chỉ coi là lỗi khi thiếu dữ liệu.
+      if (actual < Number(expected.documents))
+        throw new Error(
+          `Xác minh thất bại tại ${expected.name}: ${actual}/${expected.documents}`,
+        );
+    }
+  }
   private async run(
     job: RestoreJob,
     source: any,
@@ -1562,14 +1576,7 @@ export class BackupsService {
       this.update(job, 'VERIFYING', 92, 'Đang xác minh kết quả');
       const expectedCollections: Array<{ name: string; documents: number }> =
         manifest.collections || [];
-      for (const expected of expectedCollections)
-        if (
-          mode === 'REPLACE' &&
-          (await this.connection.db
-            .collection(expected.name)
-            .countDocuments()) !== expected.documents
-        )
-          throw new Error(`Xác minh thất bại tại ${expected.name}`);
+      await this.verifyRestoredCollections(manifest, mode);
       await this.connection.db
         .collection('auditlogs')
         .insertOne({

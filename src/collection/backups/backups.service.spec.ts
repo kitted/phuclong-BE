@@ -233,6 +233,35 @@ describe('encrypted backup envelope', () => {
       expect.anything(),
     );
   });
+
+  it('accepts records appended after the exact staging verification', async () => {
+    const counts: Record<string, number> = { auditlogs: 12, items: 5 },
+      service: any = new BackupsService(
+        {
+          db: {
+            collection: (name: string) => ({
+              countDocuments: jest.fn().mockResolvedValue(counts[name]),
+            }),
+          },
+        } as any,
+        {} as any,
+        new BackupLockService(),
+      ),
+      manifest = {
+        collections: [
+          { name: 'auditlogs', documents: 10 },
+          { name: 'items', documents: 5 },
+        ],
+      };
+
+    await expect(
+      service.verifyRestoredCollections(manifest, 'REPLACE'),
+    ).resolves.toBeUndefined();
+    counts.items = 4;
+    await expect(
+      service.verifyRestoredCollections(manifest, 'REPLACE'),
+    ).rejects.toThrow('items: 4/5');
+  });
 });
 
 describe('BackupsService dependency injection', () => {
