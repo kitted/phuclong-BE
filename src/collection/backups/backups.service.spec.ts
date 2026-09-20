@@ -1,4 +1,4 @@
-import { ObjectId } from 'bson';
+import { BSON, ObjectId } from 'mongodb';
 import { Test } from '@nestjs/testing';
 import { getConnectionToken, getModelToken } from 'nestjs-typegoose';
 import { BackupLockService } from './backup-lock.service';
@@ -92,6 +92,14 @@ describe('encrypted backup envelope', () => {
     ]);
 
     const generated = await service.generateBackupFile(true);
+    let streamedDocuments = 0;
+    await service.parseBackupStream(generated.path, {
+      document: (_name, document) => {
+        expect(() => BSON.serialize(document)).not.toThrow();
+        streamedDocuments++;
+      },
+    });
+    expect(streamedDocuments).toBe(2);
     const inspection = await service.inspectFile(generated.path);
     expect(inspection.data.collections).toEqual([
       expect.objectContaining({ name: 'items', documents: 2 }),

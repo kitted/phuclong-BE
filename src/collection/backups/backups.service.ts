@@ -9,8 +9,7 @@ import {
 import { getConnectionToken, InjectModel } from 'nestjs-typegoose';
 import { ReturnModelType } from '@typegoose/typegoose';
 import { Connection } from 'mongoose';
-import { GridFSBucket, ObjectId } from 'mongodb';
-import { EJSON } from 'bson';
+import { BSON, GridFSBucket, ObjectId } from 'mongodb';
 import {
   createCipheriv,
   createDecipheriv,
@@ -35,6 +34,8 @@ import * as bcrypt from 'bcrypt';
 import { Users, UserStatus } from '../users/schemas/users.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
 import { BackupLockService } from './backup-lock.service';
+
+const { EJSON } = BSON;
 
 type RestoreMode = 'REPLACE' | 'MERGE';
 type RestoreJobStatus =
