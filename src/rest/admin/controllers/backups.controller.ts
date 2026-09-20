@@ -14,6 +14,9 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
+import { diskStorage } from 'multer';
+import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
 import { AdminOnly } from '../decorators/admin-only';
 import { WarehouseController } from '../decorators/warehouse';
 import { BackupsService } from '../../../collection/backups/backups.service';
@@ -92,13 +95,17 @@ export class BackupsController {
   @Post('inspect')
   @UseInterceptors(
     FileInterceptor('file', {
+      storage: diskStorage({
+        destination: tmpdir(),
+        filename: (_request, _file, callback) =>
+          callback(null, `phuclong-upload-${randomUUID()}.plbackup`),
+      }),
       limits: { files: 1, fileSize: 512 * 1024 * 1024 },
     }),
   )
   inspect(@UploadedFile() file: any) {
-    if (!file?.buffer)
-      throw new BadRequestException('Vui lòng chọn file backup');
-    return this.service.inspect(file.buffer);
+    if (!file?.path) throw new BadRequestException('Vui lòng chọn file backup');
+    return this.service.inspectFile(file.path);
   }
 
   @Post(':restoreToken/restore')

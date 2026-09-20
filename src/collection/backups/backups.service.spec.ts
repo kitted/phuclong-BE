@@ -90,6 +90,16 @@ describe('encrypted backup envelope', () => {
     expect(decoded.manifest.collections).toEqual([
       expect.objectContaining({ name: 'items', documents: 2 }),
     ]);
+
+    const generated = await service.generateBackupFile(true);
+    const inspection = await service.inspectFile(generated.path);
+    const stored = service.restoreTokens.get(inspection.data.restoreToken);
+    expect(inspection.data.collections).toEqual([
+      expect.objectContaining({ name: 'items', documents: 2 }),
+    ]);
+    clearTimeout(stored.expiryTimer);
+    service.restoreTokens.delete(inspection.data.restoreToken);
+    await service.cleanupGeneratedFile(generated);
   });
 });
 

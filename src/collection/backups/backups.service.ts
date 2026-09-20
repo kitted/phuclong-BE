@@ -20,13 +20,17 @@ import {
   randomUUID,
   timingSafeEqual,
 } from 'crypto';
-import { createGzip, gzipSync, gunzipSync } from 'zlib';
+import { createGunzip, createGzip, gzipSync, gunzipSync } from 'zlib';
 import { createReadStream, createWriteStream } from 'fs';
-import { mkdtemp, open, rm, stat, writeFile } from 'fs/promises';
+import { mkdtemp, open, rm, stat, unlink, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
+import { parser } from 'stream-json';
+// stream-json 1.x exposes Assembler as CommonJS only.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import Assembler = require('stream-json/Assembler');
 import * as bcrypt from 'bcrypt';
 import { Users, UserStatus } from '../users/schemas/users.schema';
 import { RoleEnum } from '../users/interfaces/role.enum';
@@ -52,7 +56,14 @@ type RestoreJob = {
   snapshotId?: string;
   actorId?: string;
 };
-type StoredBackup = { payload: any; checksumValid: boolean; expiresAt: Date };
+type StoredBackup = {
+  payload?: any;
+  filePath?: string;
+  manifest?: any;
+  expiryTimer?: NodeJS.Timeout;
+  checksumValid: boolean;
+  expiresAt: Date;
+};
 type GeneratedBackupFile = {
   path: string;
   directory: string;
@@ -339,6 +350,149 @@ export class BackupsService {
     } catch {
       throw new BadRequestException('Không thể giải mã file backup');
     }
+  }
+  private async backupContentStream(path: string) {
+    const handle = await open(path, 'r'),
+      header = Buffer.alloc(69);
+    try {
+      const { bytesRead } = await handle.read(header, 0, header.length, 0);
+      if (
+        bytesRead < header.length ||
+        header.subarray(0, 9).toString() !== 'PLBACKUP2'
+      )
+        throw new BadRequestException('File backup không đúng định dạng');
+    } finally {
+      await handle.close();
+    }
+    const signature = header.subarray(9, 41),
+      expectedHash = createHmac('sha256', this.key('BACKUP_SIGNING_KEY'));
+    for await (const chunk of createReadStream(path, { start: 41 }))
+      expectedHash.update(chunk);
+    const expected = expectedHash.digest();
+    if (!timingSafeEqual(signature, expected))
+      throw new BadRequestException({
+        code: 'BACKUP_CHECKSUM_INVALID',
+        message: 'Chữ ký hoặc checksum file backup không hợp lệ',
+      });
+    const decipher = createDecipheriv(
+      'aes-256-gcm',
+      this.key('BACKUP_ENCRYPTION_KEY'),
+      header.subarray(41, 53),
+    );
+    decipher.setAuthTag(header.subarray(53, 69));
+    return createReadStream(path, { start: 69 })
+      .pipe(decipher)
+      .pipe(createGunzip());
+  }
+
+  private async parseBackupStream(
+    path: string,
+    handlers: {
+      collectionStart?: (name: string) => Promise<void> | void;
+      document?: (name: string, document: any) => Promise<void> | void;
+      collectionEnd?: (name: string) => Promise<void> | void;
+    } = {},
+  ) {
+    const content = await this.backupContentStream(path),
+      tokens = content.pipe(
+        parser({
+          packKeys: true,
+          packStrings: true,
+          packNumbers: true,
+          streamKeys: false,
+          streamStrings: false,
+          streamNumbers: false,
+        }),
+      );
+    let depth = 0,
+      rootKey = '',
+      collectionName = '',
+      capture: 'document' | 'manifest' | undefined,
+      assembler: Assembler | undefined,
+      manifest: any;
+    try {
+      for await (const token of tokens as any) {
+        if (capture && assembler) {
+          assembler.consume(token);
+          if (token.name === 'startObject' || token.name === 'startArray')
+            depth++;
+          else if (token.name === 'endObject' || token.name === 'endArray')
+            depth--;
+          if (assembler.done) {
+            if (capture === 'document' && handlers.document)
+              await handlers.document(
+                collectionName,
+                EJSON.parse(JSON.stringify(assembler.current)),
+              );
+            else if (capture === 'manifest')
+              manifest = EJSON.parse(JSON.stringify(assembler.current));
+            capture = undefined;
+            assembler = undefined;
+          }
+          continue;
+        }
+        if (token.name === 'keyValue') {
+          if (depth === 1) rootKey = token.value;
+          else if (depth === 2 && rootKey === 'collections')
+            collectionName = token.value;
+          continue;
+        }
+        if (
+          rootKey === 'manifest' &&
+          depth === 1 &&
+          (token.name === 'startObject' || token.name === 'startArray')
+        ) {
+          capture = 'manifest';
+          assembler = new Assembler();
+          assembler.consume(token);
+          depth++;
+          continue;
+        }
+        if (
+          token.name === 'startArray' &&
+          depth === 2 &&
+          rootKey === 'collections'
+        ) {
+          await handlers.collectionStart?.(collectionName);
+          depth++;
+          continue;
+        }
+        if (
+          depth === 3 &&
+          rootKey === 'collections' &&
+          (token.name === 'startObject' || token.name === 'startArray')
+        ) {
+          capture = 'document';
+          assembler = new Assembler();
+          assembler.consume(token);
+          depth++;
+          continue;
+        }
+        if (
+          token.name === 'endArray' &&
+          depth === 3 &&
+          rootKey === 'collections'
+        ) {
+          await handlers.collectionEnd?.(collectionName);
+          depth--;
+          continue;
+        }
+        if (token.name === 'startObject' || token.name === 'startArray')
+          depth++;
+        else if (token.name === 'endObject' || token.name === 'endArray')
+          depth--;
+      }
+    } catch (error) {
+      content.destroy();
+      throw error instanceof BadRequestException
+        ? error
+        : new BadRequestException(
+            `Không thể giải mã hoặc đọc file backup: ${error instanceof Error ? error.message : 'dữ liệu lỗi'}`,
+          );
+    }
+    if (!manifest)
+      throw new BadRequestException('File backup không có manifest hợp lệ');
+    return manifest;
   }
   async export(includeAuditLogs = true) {
     const generated = await this.generateBackupFile(includeAuditLogs),
@@ -689,6 +843,72 @@ export class BackupsService {
       },
     };
   }
+  async inspectFile(path: string) {
+    try {
+      const counts = new Map<string, number>(),
+        manifest = await this.parseBackupStream(path, {
+          collectionStart: (name) => {
+            counts.set(name, 0);
+          },
+          document: (name) => {
+            counts.set(name, (counts.get(name) || 0) + 1);
+          },
+        });
+      if (manifest.schemaVersion !== this.schemaVersion)
+        throw new BadRequestException({
+          code: 'BACKUP_SCHEMA_VERSION_UNSUPPORTED',
+          message: 'Phiên bản schema backup không được hỗ trợ',
+        });
+      const names = [...counts.keys()];
+      if (names.some((name) => !this.allowedName(name)))
+        throw new BadRequestException('File chứa collection không được phép');
+      const allowedCollections = new Set(await this.collectionNames(true));
+      if (names.some((name) => !allowedCollections.has(name)))
+        throw new BadRequestException(
+          'File chứa collection ngoài allowlist của ứng dụng',
+        );
+      for (const item of manifest.collections || [])
+        if (counts.get(item.name) !== item.documents)
+          throw new BadRequestException(
+            `Số lượng document trong manifest không khớp tại ${item.name}: ${counts.get(item.name) || 0}/${item.documents}`,
+          );
+      const restoreToken = randomUUID(),
+        expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+      const stored: StoredBackup = {
+        filePath: path,
+        manifest,
+        checksumValid: true,
+        expiresAt,
+      };
+      this.restoreTokens.set(restoreToken, stored);
+      const expiryTimer = setTimeout(
+        () => {
+          this.restoreTokens.delete(restoreToken);
+          void unlink(path).catch(() => undefined);
+        },
+        60 * 60 * 1000,
+      );
+      expiryTimer.unref();
+      stored.expiryTimer = expiryTimer;
+      return {
+        data: {
+          restoreToken,
+          checksumValid: true,
+          createdAt: manifest.createdAt,
+          schemaVersion: manifest.schemaVersion,
+          expiresAt,
+          collections: manifest.collections.map((item) => ({
+            name: item.name,
+            documents: item.documents,
+          })),
+          warnings: manifest.warnings || [],
+        },
+      };
+    } catch (error) {
+      await unlink(path).catch(() => undefined);
+      throw error;
+    }
+  }
   private async verifyAdmin(actorId: string, password: string) {
     const admin: any = await this.users
       .findOne({
@@ -710,6 +930,8 @@ export class BackupsService {
     const stored = this.restoreTokens.get(token);
     if (!stored || stored.expiresAt <= new Date()) {
       this.restoreTokens.delete(token);
+      if (stored?.filePath)
+        await unlink(stored.filePath).catch(() => undefined);
       throw new NotFoundException(
         'Restore token không tồn tại hoặc đã hết hạn',
       );
@@ -739,11 +961,10 @@ export class BackupsService {
     };
     this.jobs.set(job.id, job);
     this.restoreTokens.delete(token);
+    if (stored.expiryTimer) clearTimeout(stored.expiryTimer);
     await this.jobCollection().insertOne({ ...job, actorId });
     setImmediate(() => {
-      void this.run(job, stored.payload, dto.mode, { actorId }).catch(
-        () => undefined,
-      );
+      void this.run(job, stored, dto.mode, { actorId }).catch(() => undefined);
     });
     return {
       data: { jobId: job.id, status: job.status, progress: job.progress },
@@ -866,9 +1087,164 @@ export class BackupsService {
         )
         .catch(() => undefined);
   }
+  private async restoreStreamedBackup(
+    path: string,
+    manifest: any,
+    mode: RestoreMode,
+    suffix: string,
+    job: RestoreJob,
+  ) {
+    const manifestEntries = new Map<string, any>(
+        (manifest.collections || []).map((item) => [item.name, item]),
+      ),
+      staged: Array<{ name: string; staging: string; before: string }> = [];
+    let active:
+        | {
+            name: string;
+            collection: any;
+            batch: any[];
+            documents: number;
+            staging?: string;
+            before?: string;
+          }
+        | undefined,
+      completed = 0;
+    const flush = async () => {
+      if (!active?.batch.length) return;
+      const batch = active.batch;
+      active.batch = [];
+      if (mode === 'MERGE')
+        await active.collection.bulkWrite(
+          batch.map((document) => {
+            const { _id, ...fields } = document;
+            return {
+              updateOne: {
+                filter: { _id },
+                update: { $set: fields, $setOnInsert: { _id } },
+                upsert: true,
+              },
+            };
+          }),
+          { ordered: false },
+        );
+      else await active.collection.insertMany(batch, { ordered: false });
+    };
+    await this.parseBackupStream(path, {
+      collectionStart: async (name) => {
+        if (!manifestEntries.has(name) || !this.allowedName(name))
+          throw new BadRequestException(`Collection ${name} không hợp lệ`);
+        if (mode === 'REPLACE') {
+          const staging = `${name}__restore_${suffix}`;
+          await this.connection.db.createCollection(staging);
+          active = {
+            name,
+            collection: this.connection.db.collection(staging),
+            batch: [],
+            documents: 0,
+            staging,
+            before: `${name}__before_${suffix}`,
+          };
+        } else
+          active = {
+            name,
+            collection: this.connection.db.collection(name),
+            batch: [],
+            documents: 0,
+          };
+      },
+      document: async (name, document) => {
+        if (!active || active.name !== name)
+          throw new BadRequestException('Cấu trúc collection không hợp lệ');
+        active.batch.push(document);
+        active.documents++;
+        if (active.batch.length >= 500) await flush();
+      },
+      collectionEnd: async (name) => {
+        if (!active || active.name !== name)
+          throw new BadRequestException('Cấu trúc collection không hợp lệ');
+        await flush();
+        const expected = manifestEntries.get(name);
+        if (active.documents !== expected.documents)
+          throw new BadRequestException(
+            `Số lượng document không khớp tại ${name}`,
+          );
+        if (mode === 'REPLACE') {
+          for (const index of expected.indexes || []) {
+            const {
+              key,
+              name: indexName,
+              v,
+              ns,
+              background,
+              ...options
+            } = index;
+            await active.collection.createIndex(key, {
+              ...options,
+              name: indexName,
+            });
+          }
+          if ((await active.collection.countDocuments()) !== active.documents)
+            throw new Error(`Sai số lượng document tại ${name}`);
+          staged.push({
+            name,
+            staging: active.staging,
+            before: active.before,
+          });
+        }
+        completed++;
+        this.update(
+          job,
+          'RESTORING',
+          15 +
+            Math.round(
+              (completed / Math.max(1, manifestEntries.size)) *
+                (mode === 'REPLACE' ? 55 : 70),
+            ),
+          `Đang khôi phục ${name}`,
+        );
+        active = undefined;
+      },
+    });
+    if (completed !== manifestEntries.size)
+      throw new BadRequestException('Danh sách collection không khớp manifest');
+    if (mode === 'REPLACE') {
+      const swapped: typeof staged = [];
+      try {
+        const existing = new Set(
+          (
+            await this.connection.db
+              .listCollections({}, { nameOnly: true })
+              .toArray()
+          ).map((item) => item.name),
+        );
+        for (const item of staged) {
+          if (existing.has(item.name))
+            await this.connection.db.collection(item.name).rename(item.before);
+          await this.connection.db.collection(item.staging).rename(item.name);
+          swapped.push(item);
+        }
+      } catch (error) {
+        for (const item of swapped.reverse()) {
+          await this.connection.db
+            .collection(item.name)
+            .rename(`${item.staging}_failed`)
+            .catch(() => undefined);
+          await this.connection.db
+            .collection(item.before)
+            .rename(item.name)
+            .catch(() => undefined);
+        }
+        throw error;
+      }
+      for (const item of swapped)
+        await this.connection.db
+          .dropCollection(item.before)
+          .catch(() => undefined);
+    }
+  }
   private async run(
     job: RestoreJob,
-    payload: any,
+    source: any,
     mode: RestoreMode,
     context: { snapshotId?: string; actorId?: string; reason?: string },
   ) {
@@ -889,7 +1265,10 @@ export class BackupsService {
     const suffix = `${Date.now()}_${job.id.replace(/-/g, '')}`;
     try {
       this.update(job, 'VALIDATING', 5, 'Đang kiểm tra dữ liệu');
-      const collections: Record<string, any[]> = payload.collections,
+      const streamedFile: string | undefined = source?.filePath,
+        payload = source?.payload || source,
+        manifest = source?.manifest || payload.manifest,
+        collections: Record<string, any[]> = payload?.collections || {},
         entries = Object.entries(collections);
       this.update(
         job,
@@ -912,7 +1291,15 @@ export class BackupsService {
         actorName: actor?.fullName || actor?.username || '',
       });
       this.update(job, 'RESTORING', 15, 'Đang khôi phục dữ liệu');
-      if (mode === 'MERGE') {
+      if (streamedFile) {
+        await this.restoreStreamedBackup(
+          streamedFile,
+          manifest,
+          mode,
+          suffix,
+          job,
+        );
+      } else if (mode === 'MERGE') {
         for (let i = 0; i < entries.length; i++) {
           const [name, docs] = entries[i];
           for (let offset = 0; offset < docs.length; offset += 500) {
@@ -1010,13 +1397,16 @@ export class BackupsService {
             .catch(() => undefined);
       }
       this.update(job, 'VERIFYING', 92, 'Đang xác minh kết quả');
-      for (const [name, docs] of entries)
+      const expectedCollections: Array<{ name: string; documents: number }> =
+        manifest.collections || [];
+      for (const expected of expectedCollections)
         if (
           mode === 'REPLACE' &&
-          (await this.connection.db.collection(name).countDocuments()) !==
-            docs.length
+          (await this.connection.db
+            .collection(expected.name)
+            .countDocuments()) !== expected.documents
         )
-          throw new Error(`Xác minh thất bại tại ${name}`);
+          throw new Error(`Xác minh thất bại tại ${expected.name}`);
       await this.connection.db
         .collection('auditlogs')
         .insertOne({
@@ -1030,7 +1420,7 @@ export class BackupsService {
           resource: 'backups',
           entityId: job.id,
           description: `Khôi phục dữ liệu ${mode} hoàn tất`,
-          changedFields: Object.keys(payload.collections),
+          changedFields: expectedCollections.map((item) => item.name),
           httpStatus: 200,
           durationMs: 0,
           isDeleted: false,
@@ -1092,6 +1482,8 @@ export class BackupsService {
           )
           .catch(() => undefined);
     } finally {
+      if (source?.filePath)
+        await unlink(source.filePath).catch(() => undefined);
       await this.releaseDistributedRestoreLock(job.id);
       this.lock.unlock();
     }
