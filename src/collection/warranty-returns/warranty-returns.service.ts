@@ -336,34 +336,112 @@ export class WarrantyReturnsService {
   }
 
   async summary(): Promise<any> {
-    const rows: any[] = await this.model
-      .find({ isDeleted: false })
-      .select('sourceType status totalQuantity')
-      .lean();
-    const active = rows.filter(
-      (row) =>
-        ![
-          WarrantyReturnStatus.COMPLETED,
-          WarrantyReturnStatus.CANCELLED,
-        ].includes(row.status),
-    );
+    const today = new Date().toLocaleDateString('en-CA', {
+      timeZone: 'Asia/Ho_Chi_Minh',
+    });
+    const todayStart = new Date(`${today}T00:00:00+07:00`);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+    const staleBefore = new Date();
+    staleBefore.setDate(staleBefore.getDate() - 7);
+    const activeStatuses = [
+      WarrantyReturnStatus.RECEIVED,
+      WarrantyReturnStatus.PROCESSING,
+    ];
+    const [summary] = await this.model.aggregate([
+      { $match: { isDeleted: false } },
+      {
+        $group: {
+          _id: null,
+          totalDocuments: { $sum: 1 },
+          activeDocuments: {
+            $sum: { $cond: [{ $in: ['$status', activeStatuses] }, 1, 0] },
+          },
+          receivedDocuments: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', WarrantyReturnStatus.RECEIVED] },
+                1,
+                0,
+              ],
+            },
+          },
+          processingDocuments: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', WarrantyReturnStatus.PROCESSING] },
+                1,
+                0,
+              ],
+            },
+          },
+          staleDocuments: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $in: ['$status', activeStatuses] },
+                    { $lt: ['$createdAt', staleBefore] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          completedToday: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$status', WarrantyReturnStatus.COMPLETED] },
+                    { $gte: ['$completedAt', todayStart] },
+                    { $lt: ['$completedAt', tomorrowStart] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          activeQuantity: {
+            $sum: {
+              $cond: [
+                { $in: ['$status', activeStatuses] },
+                { $ifNull: ['$totalQuantity', 0] },
+                0,
+              ],
+            },
+          },
+          warehouseDocuments: {
+            $sum: {
+              $cond: [
+                { $eq: ['$sourceType', WarrantySourceType.WAREHOUSE] },
+                1,
+                0,
+              ],
+            },
+          },
+          truckDocuments: {
+            $sum: {
+              $cond: [{ $eq: ['$sourceType', WarrantySourceType.TRUCK] }, 1, 0],
+            },
+          },
+        },
+      },
+      { $project: { _id: 0 } },
+    ]);
     return {
       data: {
-        totalDocuments: rows.length,
-        activeDocuments: active.length,
-        processingDocuments: active.filter(
-          (row) => row.status === WarrantyReturnStatus.PROCESSING,
-        ).length,
-        activeQuantity: active.reduce(
-          (sum, row) => sum + Number(row.totalQuantity || 0),
-          0,
-        ),
-        warehouseDocuments: rows.filter(
-          (row) => row.sourceType === WarrantySourceType.WAREHOUSE,
-        ).length,
-        truckDocuments: rows.filter(
-          (row) => row.sourceType === WarrantySourceType.TRUCK,
-        ).length,
+        totalDocuments: summary?.totalDocuments || 0,
+        activeDocuments: summary?.activeDocuments || 0,
+        receivedDocuments: summary?.receivedDocuments || 0,
+        processingDocuments: summary?.processingDocuments || 0,
+        staleDocuments: summary?.staleDocuments || 0,
+        completedToday: summary?.completedToday || 0,
+        activeQuantity: summary?.activeQuantity || 0,
+        warehouseDocuments: summary?.warehouseDocuments || 0,
+        truckDocuments: summary?.truckDocuments || 0,
       },
     };
   }
