@@ -1,5 +1,6 @@
 import {
   Body,
+  Delete,
   ForbiddenException,
   Get,
   Param,
@@ -68,6 +69,17 @@ export class DailyReportsController {
     @Req() req: AuthRequest,
   ) {
     return this.service.update(String(id), dto, this.actor(req));
+  }
+  @Delete(':id') remove(
+    @Param('id', ParseIdPipe) id: ID,
+    @Req() req: AuthRequest,
+  ) {
+    const user: any = (req.user as any)?._doc || req.user;
+    return this.service.remove(
+      String(id),
+      this.actor(req),
+      String(user?.role || ''),
+    );
   }
   @Get(':id/export') async export(
     @Param('id', ParseIdPipe) id: ID,

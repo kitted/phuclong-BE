@@ -494,6 +494,27 @@ export class DailyReportsService {
     if (!doc) throw new NotFoundException('Không tìm thấy báo cáo ngày');
     return { data: doc };
   }
+  async remove(id: string, actorId: string, actorRole: string) {
+    const filter: any = { _id: id, isDeleted: false };
+    if (String(actorRole || '').toLowerCase() === RoleEnum.STAFF)
+      filter.salespersonId = actorId;
+    const doc = await this.model.findOneAndUpdate(
+      filter,
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt: new Date(),
+          deletedBy: actorId,
+        },
+      },
+      { new: true },
+    );
+    if (!doc)
+      throw new NotFoundException(
+        'Không tìm thấy báo cáo hoặc bạn không có quyền xóa',
+      );
+    return { data: { id: String(doc._id), code: doc.code, deleted: true } };
+  }
   async export(id: string) {
     const r: any = await this.detail(id),
       doc: any = r.data,

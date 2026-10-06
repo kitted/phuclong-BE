@@ -153,4 +153,61 @@ describe('DailyReportsService per-salesperson reporting', () => {
       }),
     );
   });
+
+  it('soft deletes an old report and allows its date to be reported again', async () => {
+    const service: any = Object.create(DailyReportsService.prototype);
+    const actorId = '507f1f77bcf86cd799439011';
+    service.model = {
+      findOneAndUpdate: jest.fn().mockResolvedValue({
+        _id: '507f191e810c19729de860ea',
+        code: 'BCN-261006-0001',
+      }),
+    };
+
+    const result = await service.remove(
+      '507f191e810c19729de860ea',
+      actorId,
+      'admin',
+    );
+
+    expect(service.model.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: '507f191e810c19729de860ea', isDeleted: false },
+      {
+        $set: expect.objectContaining({
+          isDeleted: true,
+          deletedAt: expect.any(Date),
+          deletedBy: actorId,
+        }),
+      },
+      { new: true },
+    );
+    expect(result.data).toEqual({
+      id: '507f191e810c19729de860ea',
+      code: 'BCN-261006-0001',
+      deleted: true,
+    });
+  });
+
+  it('only lets a sale delete their own report', async () => {
+    const service: any = Object.create(DailyReportsService.prototype);
+    const actorId = '507f1f77bcf86cd799439011';
+    service.model = {
+      findOneAndUpdate: jest.fn().mockResolvedValue({
+        _id: '507f191e810c19729de860ea',
+        code: 'BCN-261006-0001',
+      }),
+    };
+
+    await service.remove('507f191e810c19729de860ea', actorId, 'staff');
+
+    expect(service.model.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: '507f191e810c19729de860ea',
+        isDeleted: false,
+        salespersonId: actorId,
+      },
+      expect.anything(),
+      { new: true },
+    );
+  });
 });
