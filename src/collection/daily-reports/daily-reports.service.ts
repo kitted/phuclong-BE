@@ -116,6 +116,74 @@ export class DailyReportsService {
     return [...methods].join('+');
   }
 
+  async salespeople(date?: string, onlySalespersonId?: string) {
+    const invoiceFilter: any = {
+      isDeleted: { $ne: true },
+      status: { $ne: 'REVERSED' },
+    };
+    if (date) {
+      invoiceFilter.date = {
+        $gte: vietnamDateBoundary(date, false),
+        $lte: vietnamDateBoundary(date, true),
+      };
+    }
+    if (onlySalespersonId) invoiceFilter.salespersonId = onlySalespersonId;
+    const userFilter: any = { role: RoleEnum.STAFF };
+    if (onlySalespersonId) userFilter._id = onlySalespersonId;
+    const [users, invoiceRows]: any[][] = await Promise.all([
+      this.users
+        .find(userFilter)
+        .select(
+          'employeeCode fullName username phone status isDeleted deletedAt',
+        )
+        .lean(),
+      this.invoices
+        .find(invoiceFilter)
+        .select('salespersonId salespersonCode salespersonName')
+        .lean(),
+    ]);
+    const salespeople = new Map<string, any>();
+    for (const user of users) {
+      const id = String(user._id);
+      salespeople.set(id, {
+        id,
+        _id: id,
+        employeeCode: user.employeeCode,
+        fullName: user.fullName || user.username,
+        username: user.username,
+        phone: user.phone,
+        status: user.status,
+        isDeleted: Boolean(user.isDeleted),
+        historical: Boolean(
+          user.isDeleted || user.status === UserStatus.INACTIVE,
+        ),
+        hasInvoicesOnDate: false,
+      });
+    }
+    for (const invoice of invoiceRows) {
+      const id = String(invoice.salespersonId || '');
+      if (!Types.ObjectId.isValid(id)) continue;
+      const current = salespeople.get(id) || { id, _id: id, historical: true };
+      salespeople.set(id, {
+        ...current,
+        employeeCode: current.employeeCode || invoice.salespersonCode,
+        fullName: current.fullName || invoice.salespersonName || 'Sale lịch sử',
+        hasInvoicesOnDate: true,
+      });
+    }
+    return {
+      data: [...salespeople.values()].sort(
+        (left, right) =>
+          Number(Boolean(right.hasInvoicesOnDate)) -
+            Number(Boolean(left.hasInvoicesOnDate)) ||
+          String(left.employeeCode || left.fullName || '').localeCompare(
+            String(right.employeeCode || right.fullName || ''),
+            'vi',
+          ),
+      ),
+    };
+  }
+
   async preview(date: string, salespersonId: string) {
     if (!Types.ObjectId.isValid(salespersonId))
       throw new NotFoundException('Không tìm thấy sale lập báo cáo');
@@ -123,12 +191,8 @@ export class DailyReportsService {
       .findOne({
         _id: salespersonId,
         role: RoleEnum.STAFF,
-        status: UserStatus.ACTIVE,
-        isDeleted: false,
       })
       .lean();
-    if (!salesperson)
-      throw new NotFoundException('Không tìm thấy sale lập báo cáo');
     const from = vietnamDateBoundary(date, false),
       to = vietnamDateBoundary(date, true),
       [invoices, receipts, returns]: any[][] = await Promise.all([
@@ -137,7 +201,7 @@ export class DailyReportsService {
             isDeleted: { $ne: true },
             status: { $ne: 'REVERSED' },
             date: { $gte: from, $lte: to },
-            salespersonId: salesperson._id,
+            salespersonId,
           })
           .lean(),
         this.receipts
@@ -145,7 +209,7 @@ export class DailyReportsService {
             isDeleted: false,
             status: DebtPaymentStatus.ACTIVE,
             date: { $gte: from, $lte: to },
-            collectorId: salesperson._id,
+            collectorId: salespersonId,
           })
           .lean(),
         this.returns
@@ -153,10 +217,20 @@ export class DailyReportsService {
             isDeleted: false,
             status: CustomerReturnStatus.COMPLETED,
             createdAt: { $gte: from, $lte: to },
-            driverId: String(salesperson._id),
+            driverId: salespersonId,
           })
           .lean(),
       ]);
+    const historicalInvoice = invoices[0];
+    if (!salesperson && !historicalInvoice)
+      throw new NotFoundException(
+        'Không tìm thấy sale hoặc hóa đơn lịch sử tương ứng',
+      );
+    const salespersonSnapshot = salesperson || {
+      _id: salespersonId,
+      employeeCode: historicalInvoice.salespersonCode,
+      fullName: historicalInvoice.salespersonName || 'Sale lịch sử',
+    };
     const documents: any[] = [];
     let cash = 0,
       bankTransfer = 0;
@@ -306,10 +380,15 @@ export class DailyReportsService {
       data: {
         reportDate: date,
         salesperson: {
-          id: String(salesperson._id),
-          code: salesperson.employeeCode,
-          name: salesperson.fullName || salesperson.username,
-          phone: salesperson.phone,
+          id: String(salespersonSnapshot._id),
+          code: salespersonSnapshot.employeeCode,
+          name: salespersonSnapshot.fullName || salespersonSnapshot.username,
+          phone: salespersonSnapshot.phone,
+          historical: Boolean(
+            !salesperson ||
+              salesperson.isDeleted ||
+              salesperson.status === UserStatus.INACTIVE,
+          ),
         },
         period: { from, to },
         summary: {

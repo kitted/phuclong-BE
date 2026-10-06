@@ -38,6 +38,15 @@ export class DailyReportsController {
     )
       throw new ForbiddenException('Sale chỉ được lập báo cáo của chính mình');
   }
+  @Get('salespeople')
+  salespeople(@Query('date') date: string, @Req() req: AuthRequest) {
+    const user: any = (req.user as any)?._doc || req.user;
+    const ownSalespersonId =
+      String(user?.role || '').toLowerCase() === 'staff'
+        ? this.actor(req)
+        : undefined;
+    return this.service.salespeople(date, ownSalespersonId);
+  }
   @Get('preview')
   preview(@Query() query: DailyReportPreviewQueryDto, @Req() req: AuthRequest) {
     this.assertSalespersonAccess(req, query.salespersonId);

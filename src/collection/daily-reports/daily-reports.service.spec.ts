@@ -3,6 +3,9 @@ import { DailyReportsService } from './daily-reports.service';
 const leanResult = (value: unknown) => ({
   lean: jest.fn().mockResolvedValue(value),
 });
+const selectedLeanResult = (value: unknown) => ({
+  select: jest.fn().mockReturnValue(leanResult(value)),
+});
 
 describe('DailyReportsService per-salesperson reporting', () => {
   it('filters every daily operation by the selected salesperson', async () => {
@@ -56,5 +59,34 @@ describe('DailyReportsService per-salesperson reporting', () => {
       salespersonId,
       isDeleted: false,
     });
+  });
+
+  it('lists a historical salesperson from old invoice snapshots', async () => {
+    const service: any = Object.create(DailyReportsService.prototype);
+    const salespersonId = '507f1f77bcf86cd799439011';
+    service.users = { find: jest.fn().mockReturnValue(selectedLeanResult([])) };
+    service.invoices = {
+      find: jest.fn().mockReturnValue(
+        selectedLeanResult([
+          {
+            salespersonId,
+            salespersonCode: 'SALE-CU',
+            salespersonName: 'Sale dữ liệu cũ',
+          },
+        ]),
+      ),
+    };
+
+    const result = await service.salespeople('2025-01-10');
+
+    expect(result.data).toContainEqual(
+      expect.objectContaining({
+        id: salespersonId,
+        employeeCode: 'SALE-CU',
+        fullName: 'Sale dữ liệu cũ',
+        historical: true,
+        hasInvoicesOnDate: true,
+      }),
+    );
   });
 });
