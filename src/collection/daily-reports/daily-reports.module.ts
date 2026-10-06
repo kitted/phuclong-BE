@@ -10,6 +10,7 @@ import { CustomerReturns } from '../customer-returns/schemas/customer-returns.sc
 import { Products } from '../products/schemas/products.schema';
 import { Customers } from '../customers/schemas/customers.schema';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
+import { Trucks } from '../trucks/schemas/trucks.schema';
 import { DailyReportsService } from './daily-reports.service';
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { DailyReportsService } from './daily-reports.service';
       Products,
       Customers,
       WebsiteProducts,
+      Trucks,
     ]),
   ],
   providers: [DailyReportsService],

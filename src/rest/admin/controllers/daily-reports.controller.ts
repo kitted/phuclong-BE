@@ -14,6 +14,7 @@ import { WarehouseController } from '../decorators/warehouse';
 import { DailyReportsService } from '../../../collection/daily-reports/daily-reports.service';
 import {
   CreateDailyReportDto,
+  DailyReportPreviewQueryDto,
   DailyReportQueryDto,
   UpdateDailyReportDto,
 } from '../../../collection/daily-reports/dtos/daily-reports.dto';
@@ -28,8 +29,8 @@ export class DailyReportsController {
       d = u?._doc || u;
     return String(d?.id || d?._id || '');
   }
-  @Get('preview') preview(@Query('date') date: string) {
-    return this.service.preview(date);
+  @Get('preview') preview(@Query() query: DailyReportPreviewQueryDto) {
+    return this.service.preview(query.date, query.truckId);
   }
   @Post() create(@Body() dto: CreateDailyReportDto, @Req() req: AuthRequest) {
     return this.service.create(dto, this.actor(req));

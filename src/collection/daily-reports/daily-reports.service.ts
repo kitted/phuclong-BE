@@ -33,6 +33,7 @@ import { Products } from '../products/schemas/products.schema';
 import { Customers } from '../customers/schemas/customers.schema';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 import { Types } from 'mongoose';
+import { Trucks } from '../trucks/schemas/trucks.schema';
 @Injectable()
 export class DailyReportsService {
   constructor(
@@ -51,7 +52,56 @@ export class DailyReportsService {
     private customers: ReturnModelType<typeof Customers>,
     @InjectModel(WebsiteProducts)
     private websiteProducts: ReturnModelType<typeof WebsiteProducts>,
+    @InjectModel(Trucks)
+    private trucks: ReturnModelType<typeof Trucks>,
   ) {}
+
+  private reportIndexReady?: Promise<void>;
+
+  private ensurePerTruckReportIndex() {
+    if (!this.reportIndexReady)
+      this.reportIndexReady = (async () => {
+        try {
+          const collection: any = this.model.collection;
+          const indexes: any[] = await collection.indexes();
+          const oldDateOnlyIndex = indexes.find(
+            (item) =>
+              item.unique &&
+              Object.keys(item.key || {}).length === 1 &&
+              item.key?.reportDate === 1,
+          );
+          if (oldDateOnlyIndex)
+            try {
+              await collection.dropIndex(oldDateOnlyIndex.name);
+            } catch (error: any) {
+              if (error?.code !== 27 && error?.codeName !== 'IndexNotFound')
+                throw error;
+            }
+          const hasPerTruckIndex = indexes.some(
+            (item) =>
+              item.unique &&
+              item.key?.reportDate === 1 &&
+              item.key?.truckId === 1,
+          );
+          if (!hasPerTruckIndex)
+            await collection.createIndex(
+              { reportDate: 1, truckId: 1 },
+              {
+                unique: true,
+                name: 'reportDate_1_truckId_1',
+                partialFilterExpression: {
+                  truckId: { $type: 'objectId' },
+                  isDeleted: false,
+                },
+              },
+            );
+        } catch (error: any) {
+          if (error?.code !== 26 && error?.codeName !== 'NamespaceNotFound')
+            throw error;
+        }
+      })();
+    return this.reportIndexReady;
+  }
 
   private paymentMethodLabel(payments: any[] = []): string {
     const methods = new Set(
@@ -64,7 +114,13 @@ export class DailyReportsService {
     return [...methods].join('+');
   }
 
-  async preview(date: string) {
+  async preview(date: string, truckId: string) {
+    if (!Types.ObjectId.isValid(truckId))
+      throw new NotFoundException('Không tìm thấy xe lập báo cáo');
+    const truck: any = await this.trucks
+      .findOne({ _id: truckId, isDeleted: false })
+      .lean();
+    if (!truck) throw new NotFoundException('Không tìm thấy xe lập báo cáo');
     const from = vietnamDateBoundary(date, false),
       to = vietnamDateBoundary(date, true),
       [invoices, receipts, returns]: any[][] = await Promise.all([
@@ -73,6 +129,8 @@ export class DailyReportsService {
             isDeleted: { $ne: true },
             status: { $ne: 'REVERSED' },
             date: { $gte: from, $lte: to },
+            sourceType: 'truck',
+            truckId: truck._id,
           })
           .lean(),
         this.receipts
@@ -80,6 +138,7 @@ export class DailyReportsService {
             isDeleted: false,
             status: DebtPaymentStatus.ACTIVE,
             date: { $gte: from, $lte: to },
+            collectorId: truck.driverId || new Types.ObjectId(),
           })
           .lean(),
         this.returns
@@ -87,6 +146,7 @@ export class DailyReportsService {
             isDeleted: false,
             status: CustomerReturnStatus.COMPLETED,
             createdAt: { $gte: from, $lte: to },
+            destinationTruckId: String(truck._id),
           })
           .lean(),
       ]);
@@ -238,6 +298,14 @@ export class DailyReportsService {
     return {
       data: {
         reportDate: date,
+        truck: {
+          id: String(truck._id),
+          code: truck.code,
+          name: truck.name,
+          licensePlate: truck.licensePlate,
+          driverId: truck.driverId ? String(truck.driverId) : undefined,
+          driverName: truck.driverName || truck.driver,
+        },
         period: { from, to },
         summary: {
           documentCount: documents.length,
@@ -258,9 +326,17 @@ export class DailyReportsService {
     };
   }
   async create(dto: CreateDailyReportDto, actorId: string) {
-    if (await this.model.exists({ reportDate: dto.date, isDeleted: false }))
-      throw new ConflictException('Ngày này đã được chốt báo cáo');
-    const preview: any = await this.preview(dto.date),
+    await this.ensurePerTruckReportIndex();
+    if (
+      await this.model.exists({
+        reportDate: dto.date,
+        truckId: dto.truckId,
+        isDeleted: false,
+      })
+    )
+      throw new ConflictException('Xe này đã được chốt báo cáo trong ngày');
+    const preview: any = await this.preview(dto.date, dto.truckId),
+      truck = preview.data.truck,
       key = dto.date.replaceAll('-', ''),
       c: any = await this.counters.findOneAndUpdate(
         { key },
@@ -270,11 +346,20 @@ export class DailyReportsService {
       doc = await this.model.create({
         code: `BCN-${key.slice(2)}-${String(c.sequence).padStart(4, '0')}`,
         reportDate: dto.date,
+        truckId: dto.truckId,
+        truckCode: truck.code,
+        truckName: truck.name,
+        truckLicensePlate: truck.licensePlate,
+        driverId: truck.driverId,
+        driverName: truck.driverName,
         periodFrom: preview.data.period.from,
         periodTo: preview.data.period.to,
         area: dto.area?.trim() || undefined,
-        performerName: dto.performerName?.trim() || undefined,
-        vehicle: dto.vehicle?.trim() || undefined,
+        performerName:
+          dto.performerName?.trim() || truck.driverName || undefined,
+        vehicle:
+          dto.vehicle?.trim() ||
+          [truck.name, truck.licensePlate].filter(Boolean).join(' · '),
         snapshot: preview.data,
         manualAdjustments: dto.manualAdjustments || [],
         notes: dto.notes,
@@ -292,6 +377,7 @@ export class DailyReportsService {
       if (q.from) filter.reportDate.$gte = q.from;
       if (q.to) filter.reportDate.$lte = q.to;
     }
+    if (q.truckId) filter.truckId = q.truckId;
     const [data, total] = await Promise.all([
       this.model
         .find(filter)
@@ -329,8 +415,12 @@ export class DailyReportsService {
       summary = book.addWorksheet('Tổng hợp'),
       products = book.addWorksheet('Hàng bán');
     summary.addRows([
-      ['BÁO CÁO TỔNG HỢP NGÀY', doc.reportDate],
+      ['BÁO CÁO CUỐI NGÀY THEO XE', doc.reportDate],
       ['Mã báo cáo', doc.code],
+      [
+        'Xe',
+        [doc.truckName, doc.truckLicensePlate].filter(Boolean).join(' · '),
+      ],
       [],
       ['Chỉ số', 'Giá trị'],
       ...Object.entries(s.summary || {}),

@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
+  IsMongoId,
   IsNumber,
   IsOptional,
   IsString,
@@ -15,6 +16,7 @@ export class DailyManualAdjustmentDto {
 }
 export class CreateDailyReportDto {
   @IsDateString() date: string;
+  @IsMongoId() truckId: string;
   @IsOptional() @IsString() area?: string;
   @IsOptional() @IsString() performerName?: string;
   @IsOptional() @IsString() vehicle?: string;
@@ -41,6 +43,11 @@ export class UpdateDailyReportDto {
 export class DailyReportQueryDto {
   @IsOptional() @IsString() from?: string;
   @IsOptional() @IsString() to?: string;
+  @IsOptional() @IsMongoId() truckId?: string;
   @IsOptional() page?: string;
   @IsOptional() limit?: string;
+}
+export class DailyReportPreviewQueryDto {
+  @IsDateString() date: string;
+  @IsMongoId() truckId: string;
 }
