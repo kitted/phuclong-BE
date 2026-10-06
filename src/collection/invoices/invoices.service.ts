@@ -794,6 +794,38 @@ export class InvoicesService {
     return { invoicePayments, debtPayments };
   }
 
+  private assertDebtLimit(
+    customer: any,
+    customerDebtAfter: number,
+    invoiceDebtAmount: number,
+    allowOverride?: boolean,
+    overrideReason?: string,
+  ) {
+    // Hóa đơn đã thanh toán đủ hoặc chỉ có quà tặng không làm tăng công nợ,
+    // nên dư nợ cũ của khách không được dùng để chặn việc xuất hóa đơn.
+    if (invoiceDebtAmount <= 0) return;
+    if (allowOverride && !overrideReason?.trim())
+      throw new BadRequestException(
+        'Phải nhập lý do cho khách mua vượt hạn mức công nợ',
+      );
+    if (
+      customer?.debtLimit > 0 &&
+      customerDebtAfter > customer.debtLimit &&
+      !allowOverride
+    )
+      throw new ConflictException({
+        code: 'CUSTOMER_DEBT_LIMIT_EXCEEDED',
+        message: 'Hóa đơn làm vượt hạn mức công nợ',
+        details: {
+          currentDebt: customer.debt,
+          invoiceDebt: invoiceDebtAmount,
+          projectedDebt: customerDebtAfter,
+          debtLimit: customer.debtLimit,
+          exceededAmount: customerDebtAfter - customer.debtLimit,
+        },
+      });
+  }
+
   async create(dto: CreateInvoiceDto, actor: Actor = {}): Promise<any> {
     this.ensureInvoiceHasContents(dto);
     const salespersonId = resolveInvoiceSalespersonId(dto.salespersonId, actor);
@@ -977,28 +1009,13 @@ export class InvoicesService {
         const split = this.splitPayments(payments, paidAmount);
         if (!customer && debtAmount > 0)
           throw new ConflictException('Khách lẻ phải thanh toán đủ');
-        if (dto.allowDebtLimitOverride && !dto.debtOverrideReason?.trim())
-          throw new BadRequestException(
-            'Phải nhập lý do cho khách mua vượt hạn mức công nợ',
-          );
-        if (
-          customer?.debtLimit > 0 &&
-          customerDebtAfter > customer.debtLimit &&
-          !dto.allowDebtLimitOverride
-        ) {
-          throw new ConflictException({
-            code: 'CUSTOMER_DEBT_LIMIT_EXCEEDED',
-            message: 'Hóa đơn làm vượt hạn mức công nợ',
-            details: {
-              currentDebt: customer.debt,
-              invoiceDebt: debtAmount,
-              existingDebtPaidAmount,
-              projectedDebt: customerDebtAfter,
-              debtLimit: customer.debtLimit,
-              exceededAmount: customerDebtAfter - customer.debtLimit,
-            },
-          });
-        }
+        this.assertDebtLimit(
+          customer,
+          customerDebtAfter,
+          debtAmount,
+          dto.allowDebtLimitOverride,
+          dto.debtOverrideReason,
+        );
         const day = this.dayParts(date);
         const counter: any = await this.counterModel.findOneAndUpdate(
           { key: `INVOICE_${day}` },

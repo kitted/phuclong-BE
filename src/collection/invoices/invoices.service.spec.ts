@@ -199,6 +199,28 @@ describe('gift-only invoice validation', () => {
       grandTotal: 0,
     });
   });
+
+  it('does not enforce an old exceeded debt limit for a gift-only invoice', () => {
+    expect(() =>
+      service.assertDebtLimit(
+        { debt: 1500000, debtLimit: 1000000 },
+        1500000,
+        0,
+        false,
+      ),
+    ).not.toThrow();
+  });
+
+  it('still rejects a sale invoice that creates debt over the limit', () => {
+    expect(() =>
+      service.assertDebtLimit(
+        { debt: 900000, debtLimit: 1000000 },
+        1100000,
+        200000,
+        false,
+      ),
+    ).toThrow('Hóa đơn làm vượt hạn mức công nợ');
+  });
 });
 
 describe('truck invoice negative inventory', () => {
