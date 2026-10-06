@@ -4,20 +4,17 @@ const leanResult = (value: unknown) => ({
   lean: jest.fn().mockResolvedValue(value),
 });
 
-describe('DailyReportsService per-truck reporting', () => {
-  it('filters every daily operation by the selected truck', async () => {
+describe('DailyReportsService per-salesperson reporting', () => {
+  it('filters every daily operation by the selected salesperson', async () => {
     const service: any = Object.create(DailyReportsService.prototype);
-    const truckId = '507f1f77bcf86cd799439011';
-    const driverId = '507f191e810c19729de860ea';
-    service.trucks = {
+    const salespersonId = '507f1f77bcf86cd799439011';
+    service.users = {
       findOne: jest.fn().mockReturnValue(
         leanResult({
-          _id: truckId,
-          code: 'T01',
-          name: 'Xe 01',
-          licensePlate: '51A-12345',
-          driverId,
-          driverName: 'Tài xế 01',
+          _id: salespersonId,
+          employeeCode: 'SALE01',
+          fullName: 'Sale 01',
+          phone: '0900000001',
         }),
       ),
     };
@@ -25,36 +22,38 @@ describe('DailyReportsService per-truck reporting', () => {
     service.receipts = { find: jest.fn().mockReturnValue(leanResult([])) };
     service.returns = { find: jest.fn().mockReturnValue(leanResult([])) };
 
-    const result = await service.preview('2026-10-06', truckId);
+    const result = await service.preview('2026-10-06', salespersonId);
 
     expect(service.invoices.find).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceType: 'truck', truckId }),
+      expect.objectContaining({ salespersonId }),
     );
     expect(service.receipts.find).toHaveBeenCalledWith(
-      expect.objectContaining({ collectorId: driverId }),
+      expect.objectContaining({ collectorId: salespersonId }),
     );
     expect(service.returns.find).toHaveBeenCalledWith(
-      expect.objectContaining({ destinationTruckId: truckId }),
+      expect.objectContaining({ driverId: salespersonId }),
     );
-    expect(result.data.truck).toMatchObject({
-      id: truckId,
-      code: 'T01',
-      driverId,
+    expect(result.data.salesperson).toMatchObject({
+      id: salespersonId,
+      code: 'SALE01',
+      name: 'Sale 01',
     });
   });
 
-  it('checks duplicate reports by both date and truck', async () => {
+  it('checks duplicate reports by both date and salesperson', async () => {
     const service: any = Object.create(DailyReportsService.prototype);
-    const truckId = '507f1f77bcf86cd799439011';
-    service.ensurePerTruckReportIndex = jest.fn().mockResolvedValue(undefined);
+    const salespersonId = '507f1f77bcf86cd799439011';
+    service.ensurePerSalespersonReportIndex = jest
+      .fn()
+      .mockResolvedValue(undefined);
     service.model = { exists: jest.fn().mockResolvedValue({ _id: 'report' }) };
 
     await expect(
-      service.create({ date: '2026-10-06', truckId }, 'actor'),
-    ).rejects.toThrow('Xe này đã được chốt báo cáo trong ngày');
+      service.create({ date: '2026-10-06', salespersonId }, 'actor'),
+    ).rejects.toThrow('Sale này đã được chốt báo cáo trong ngày');
     expect(service.model.exists).toHaveBeenCalledWith({
       reportDate: '2026-10-06',
-      truckId,
+      salespersonId,
       isDeleted: false,
     });
   });

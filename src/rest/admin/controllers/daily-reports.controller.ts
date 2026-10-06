@@ -1,5 +1,6 @@
 import {
   Body,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -29,10 +30,21 @@ export class DailyReportsController {
       d = u?._doc || u;
     return String(d?.id || d?._id || '');
   }
-  @Get('preview') preview(@Query() query: DailyReportPreviewQueryDto) {
-    return this.service.preview(query.date, query.truckId);
+  private assertSalespersonAccess(req: AuthRequest, salespersonId: string) {
+    const user: any = (req.user as any)?._doc || req.user;
+    if (
+      String(user?.role || '').toLowerCase() === 'staff' &&
+      this.actor(req) !== String(salespersonId)
+    )
+      throw new ForbiddenException('Sale chỉ được lập báo cáo của chính mình');
+  }
+  @Get('preview')
+  preview(@Query() query: DailyReportPreviewQueryDto, @Req() req: AuthRequest) {
+    this.assertSalespersonAccess(req, query.salespersonId);
+    return this.service.preview(query.date, query.salespersonId);
   }
   @Post() create(@Body() dto: CreateDailyReportDto, @Req() req: AuthRequest) {
+    this.assertSalespersonAccess(req, dto.salespersonId);
     return this.service.create(dto, this.actor(req));
   }
   @Get() list(@Query() q: DailyReportQueryDto): Promise<any> {

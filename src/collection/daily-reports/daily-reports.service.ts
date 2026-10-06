@@ -33,7 +33,8 @@ import { Products } from '../products/schemas/products.schema';
 import { Customers } from '../customers/schemas/customers.schema';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 import { Types } from 'mongoose';
-import { Trucks } from '../trucks/schemas/trucks.schema';
+import { Users, UserStatus } from '../users/schemas/users.schema';
+import { RoleEnum } from '../users/interfaces/role.enum';
 @Injectable()
 export class DailyReportsService {
   constructor(
@@ -52,45 +53,46 @@ export class DailyReportsService {
     private customers: ReturnModelType<typeof Customers>,
     @InjectModel(WebsiteProducts)
     private websiteProducts: ReturnModelType<typeof WebsiteProducts>,
-    @InjectModel(Trucks)
-    private trucks: ReturnModelType<typeof Trucks>,
+    @InjectModel(Users)
+    private users: ReturnModelType<typeof Users>,
   ) {}
 
   private reportIndexReady?: Promise<void>;
 
-  private ensurePerTruckReportIndex() {
+  private ensurePerSalespersonReportIndex() {
     if (!this.reportIndexReady)
       this.reportIndexReady = (async () => {
         try {
           const collection: any = this.model.collection;
           const indexes: any[] = await collection.indexes();
-          const oldDateOnlyIndex = indexes.find(
+          const obsoleteIndexes = indexes.filter(
             (item) =>
               item.unique &&
-              Object.keys(item.key || {}).length === 1 &&
-              item.key?.reportDate === 1,
+              item.key?.reportDate === 1 &&
+              (Object.keys(item.key || {}).length === 1 ||
+                item.key?.truckId === 1),
           );
-          if (oldDateOnlyIndex)
+          for (const obsoleteIndex of obsoleteIndexes)
             try {
-              await collection.dropIndex(oldDateOnlyIndex.name);
+              await collection.dropIndex(obsoleteIndex.name);
             } catch (error: any) {
               if (error?.code !== 27 && error?.codeName !== 'IndexNotFound')
                 throw error;
             }
-          const hasPerTruckIndex = indexes.some(
+          const hasPerSalespersonIndex = indexes.some(
             (item) =>
               item.unique &&
               item.key?.reportDate === 1 &&
-              item.key?.truckId === 1,
+              item.key?.salespersonId === 1,
           );
-          if (!hasPerTruckIndex)
+          if (!hasPerSalespersonIndex)
             await collection.createIndex(
-              { reportDate: 1, truckId: 1 },
+              { reportDate: 1, salespersonId: 1 },
               {
                 unique: true,
-                name: 'reportDate_1_truckId_1',
+                name: 'reportDate_1_salespersonId_1',
                 partialFilterExpression: {
-                  truckId: { $type: 'objectId' },
+                  salespersonId: { $type: 'objectId' },
                   isDeleted: false,
                 },
               },
@@ -114,13 +116,19 @@ export class DailyReportsService {
     return [...methods].join('+');
   }
 
-  async preview(date: string, truckId: string) {
-    if (!Types.ObjectId.isValid(truckId))
-      throw new NotFoundException('Không tìm thấy xe lập báo cáo');
-    const truck: any = await this.trucks
-      .findOne({ _id: truckId, isDeleted: false })
+  async preview(date: string, salespersonId: string) {
+    if (!Types.ObjectId.isValid(salespersonId))
+      throw new NotFoundException('Không tìm thấy sale lập báo cáo');
+    const salesperson: any = await this.users
+      .findOne({
+        _id: salespersonId,
+        role: RoleEnum.STAFF,
+        status: UserStatus.ACTIVE,
+        isDeleted: false,
+      })
       .lean();
-    if (!truck) throw new NotFoundException('Không tìm thấy xe lập báo cáo');
+    if (!salesperson)
+      throw new NotFoundException('Không tìm thấy sale lập báo cáo');
     const from = vietnamDateBoundary(date, false),
       to = vietnamDateBoundary(date, true),
       [invoices, receipts, returns]: any[][] = await Promise.all([
@@ -129,8 +137,7 @@ export class DailyReportsService {
             isDeleted: { $ne: true },
             status: { $ne: 'REVERSED' },
             date: { $gte: from, $lte: to },
-            sourceType: 'truck',
-            truckId: truck._id,
+            salespersonId: salesperson._id,
           })
           .lean(),
         this.receipts
@@ -138,7 +145,7 @@ export class DailyReportsService {
             isDeleted: false,
             status: DebtPaymentStatus.ACTIVE,
             date: { $gte: from, $lte: to },
-            collectorId: truck.driverId || new Types.ObjectId(),
+            collectorId: salesperson._id,
           })
           .lean(),
         this.returns
@@ -146,7 +153,7 @@ export class DailyReportsService {
             isDeleted: false,
             status: CustomerReturnStatus.COMPLETED,
             createdAt: { $gte: from, $lte: to },
-            destinationTruckId: String(truck._id),
+            driverId: String(salesperson._id),
           })
           .lean(),
       ]);
@@ -298,13 +305,11 @@ export class DailyReportsService {
     return {
       data: {
         reportDate: date,
-        truck: {
-          id: String(truck._id),
-          code: truck.code,
-          name: truck.name,
-          licensePlate: truck.licensePlate,
-          driverId: truck.driverId ? String(truck.driverId) : undefined,
-          driverName: truck.driverName || truck.driver,
+        salesperson: {
+          id: String(salesperson._id),
+          code: salesperson.employeeCode,
+          name: salesperson.fullName || salesperson.username,
+          phone: salesperson.phone,
         },
         period: { from, to },
         summary: {
@@ -326,17 +331,17 @@ export class DailyReportsService {
     };
   }
   async create(dto: CreateDailyReportDto, actorId: string) {
-    await this.ensurePerTruckReportIndex();
+    await this.ensurePerSalespersonReportIndex();
     if (
       await this.model.exists({
         reportDate: dto.date,
-        truckId: dto.truckId,
+        salespersonId: dto.salespersonId,
         isDeleted: false,
       })
     )
-      throw new ConflictException('Xe này đã được chốt báo cáo trong ngày');
-    const preview: any = await this.preview(dto.date, dto.truckId),
-      truck = preview.data.truck,
+      throw new ConflictException('Sale này đã được chốt báo cáo trong ngày');
+    const preview: any = await this.preview(dto.date, dto.salespersonId),
+      salesperson = preview.data.salesperson,
       key = dto.date.replaceAll('-', ''),
       c: any = await this.counters.findOneAndUpdate(
         { key },
@@ -346,20 +351,16 @@ export class DailyReportsService {
       doc = await this.model.create({
         code: `BCN-${key.slice(2)}-${String(c.sequence).padStart(4, '0')}`,
         reportDate: dto.date,
-        truckId: dto.truckId,
-        truckCode: truck.code,
-        truckName: truck.name,
-        truckLicensePlate: truck.licensePlate,
-        driverId: truck.driverId,
-        driverName: truck.driverName,
+        salespersonId: dto.salespersonId,
+        salespersonCode: salesperson.code,
+        salespersonName: salesperson.name,
+        salespersonPhone: salesperson.phone,
         periodFrom: preview.data.period.from,
         periodTo: preview.data.period.to,
         area: dto.area?.trim() || undefined,
         performerName:
-          dto.performerName?.trim() || truck.driverName || undefined,
-        vehicle:
-          dto.vehicle?.trim() ||
-          [truck.name, truck.licensePlate].filter(Boolean).join(' · '),
+          dto.performerName?.trim() || salesperson.name || undefined,
+        vehicle: dto.vehicle?.trim() || undefined,
         snapshot: preview.data,
         manualAdjustments: dto.manualAdjustments || [],
         notes: dto.notes,
@@ -377,7 +378,7 @@ export class DailyReportsService {
       if (q.from) filter.reportDate.$gte = q.from;
       if (q.to) filter.reportDate.$lte = q.to;
     }
-    if (q.truckId) filter.truckId = q.truckId;
+    if (q.salespersonId) filter.salespersonId = q.salespersonId;
     const [data, total] = await Promise.all([
       this.model
         .find(filter)
@@ -415,11 +416,11 @@ export class DailyReportsService {
       summary = book.addWorksheet('Tổng hợp'),
       products = book.addWorksheet('Hàng bán');
     summary.addRows([
-      ['BÁO CÁO CUỐI NGÀY THEO XE', doc.reportDate],
+      ['BÁO CÁO CUỐI NGÀY THEO SALE', doc.reportDate],
       ['Mã báo cáo', doc.code],
       [
-        'Xe',
-        [doc.truckName, doc.truckLicensePlate].filter(Boolean).join(' · '),
+        'Sale',
+        [doc.salespersonCode, doc.salespersonName].filter(Boolean).join(' · '),
       ],
       [],
       ['Chỉ số', 'Giá trị'],

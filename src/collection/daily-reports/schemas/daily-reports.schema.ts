@@ -1,6 +1,7 @@
 import { index, prop, Ref } from '@typegoose/typegoose';
 import { BaseModel } from '../../../core/base.model';
 import { Trucks } from '../../trucks/schemas/trucks.schema';
+import { Users } from '../../users/schemas/users.schema';
 export class DailyManualAdjustment {
   @prop({ required: true }) type: string;
   @prop({ required: true }) label: string;
@@ -8,11 +9,11 @@ export class DailyManualAdjustment {
   @prop() note?: string;
 }
 @index(
-  { reportDate: 1, truckId: 1 },
+  { reportDate: 1, salespersonId: 1 },
   {
     unique: true,
     partialFilterExpression: {
-      truckId: { $type: 'objectId' },
+      salespersonId: { $type: 'objectId' },
       isDeleted: false,
     },
   },
@@ -20,6 +21,11 @@ export class DailyManualAdjustment {
 export class DailyReports extends BaseModel {
   @prop({ required: true, unique: true }) code: string;
   @prop({ required: true }) reportDate: string;
+  @prop({ ref: () => Users }) salespersonId?: Ref<Users>;
+  @prop() salespersonCode?: string;
+  @prop() salespersonName?: string;
+  @prop() salespersonPhone?: string;
+  // Giữ các trường xe để đọc lại báo cáo đã chốt trước khi chuyển sang theo sale.
   @prop({ ref: () => Trucks }) truckId?: Ref<Trucks>;
   @prop() truckCode?: string;
   @prop() truckName?: string;
