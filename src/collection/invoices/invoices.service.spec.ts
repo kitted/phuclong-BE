@@ -165,6 +165,42 @@ describe('invoice payment with old debt allocation', () => {
   });
 });
 
+describe('gift-only invoice validation', () => {
+  const service: any = Object.create(InvoicesService.prototype);
+
+  it('allows an invoice with gifts and no sale items', () => {
+    expect(() =>
+      service.ensureInvoiceHasContents({
+        items: [],
+        gifts: [{ productId: '507f1f77bcf86cd799439011', qty: 1 }],
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects an invoice without sale items, gifts, or a promotion gift code', () => {
+    expect(() =>
+      service.ensureInvoiceHasContents({ items: [], gifts: [] }),
+    ).toThrow('Hóa đơn phải có ít nhất một sản phẩm bán hoặc quà tặng');
+  });
+
+  it('calculates a zero-value preview when there are no sale items', async () => {
+    service.productModel = {
+      find: jest.fn().mockReturnValue({
+        session: jest
+          .fn()
+          .mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
+      }),
+    };
+
+    await expect(service.calculate({ items: [] })).resolves.toMatchObject({
+      items: [],
+      subtotal: 0,
+      discountAmount: 0,
+      grandTotal: 0,
+    });
+  });
+});
+
 describe('truck invoice negative inventory', () => {
   it('deducts an existing truck balance without requiring enough stock', async () => {
     const service: any = Object.create(InvoicesService.prototype);

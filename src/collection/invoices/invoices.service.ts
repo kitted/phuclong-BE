@@ -362,16 +362,23 @@ export class InvoicesService {
     return [...merged].map(([productId, qty]) => ({ productId, qty }));
   }
 
+  private ensureInvoiceHasContents(dto: CreateInvoiceDto) {
+    const hasSaleItems = Array.isArray(dto.items) && dto.items.length > 0;
+    const hasDirectGifts = Array.isArray(dto.gifts) && dto.gifts.length > 0;
+    const hasManualPromotionCode = Boolean(dto.voucherCode?.trim());
+    if (!hasSaleItems && !hasDirectGifts && !hasManualPromotionCode)
+      throw new BadRequestException(
+        'Hóa đơn phải có ít nhất một sản phẩm bán hoặc quà tặng',
+      );
+  }
+
   private async calculate(
     dto: InvoicePreviewDto,
     session?: ClientSession,
     actorId?: string,
   ) {
-    if (
-      !Array.isArray(dto.items) ||
-      (!dto.items.length && !dto.voucherCode?.trim())
-    )
-      throw new BadRequestException('Hóa đơn phải có ít nhất một sản phẩm');
+    if (!Array.isArray(dto.items))
+      throw new BadRequestException('Danh sách sản phẩm không hợp lệ');
     const requested = dto.items.map((item) => {
       if (
         !Types.ObjectId.isValid(item.productId) ||
@@ -788,6 +795,7 @@ export class InvoicesService {
   }
 
   async create(dto: CreateInvoiceDto, actor: Actor = {}): Promise<any> {
+    this.ensureInvoiceHasContents(dto);
     const salespersonId = resolveInvoiceSalespersonId(dto.salespersonId, actor);
     if (dto.customerId && dto.newCustomer)
       throw new BadRequestException(
