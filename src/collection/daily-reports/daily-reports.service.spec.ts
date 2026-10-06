@@ -89,4 +89,68 @@ describe('DailyReportsService per-salesperson reporting', () => {
       }),
     );
   });
+
+  it('counts promotion gifts in daily product quantities without adding revenue', async () => {
+    const service: any = Object.create(DailyReportsService.prototype);
+    const salespersonId = '507f1f77bcf86cd799439011';
+    const productId = '507f191e810c19729de860ea';
+    service.users = {
+      findOne: jest
+        .fn()
+        .mockReturnValue(
+          leanResult({ _id: salespersonId, fullName: 'Sale 01' }),
+        ),
+    };
+    service.invoices = {
+      find: jest.fn().mockReturnValue(
+        leanResult([
+          {
+            _id: 'invoice-1',
+            salespersonId,
+            grandTotal: 100000,
+            items: [
+              {
+                productId,
+                productCode: 'SP01',
+                productName: 'Sản phẩm 01',
+                unit: 'Cái',
+                qty: 2,
+                lineTotal: 100000,
+                lineType: 'SALE',
+              },
+              {
+                productId,
+                productCode: 'SP01',
+                productName: 'Sản phẩm 01',
+                unit: 'Cái',
+                qty: 1,
+                lineTotal: 0,
+                lineType: 'GIFT',
+              },
+            ],
+          },
+        ]),
+      ),
+    };
+    service.receipts = { find: jest.fn().mockReturnValue(leanResult([])) };
+    service.returns = { find: jest.fn().mockReturnValue(leanResult([])) };
+    service.productsModel = {
+      find: jest.fn().mockReturnValue(selectedLeanResult([])),
+    };
+    service.websiteProducts = {
+      find: jest.fn().mockReturnValue(selectedLeanResult([])),
+    };
+
+    const result = await service.preview('2026-10-06', salespersonId);
+
+    expect(result.data.products).toContainEqual(
+      expect.objectContaining({
+        productId,
+        quantity: 3,
+        saleQuantity: 2,
+        giftQuantity: 1,
+        revenue: 100000,
+      }),
+    );
+  });
 });

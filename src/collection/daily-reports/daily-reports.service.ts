@@ -264,7 +264,7 @@ export class DailyReportsService {
       e.invoiceCount++;
       employees.set(String(x.salespersonId), e);
       for (const item of x.items || []) {
-        if (item.lineType === InvoiceLineType.GIFT) continue;
+        const isGift = item.lineType === InvoiceLineType.GIFT;
         const key = String(item.productId),
           p = products.get(key) || {
             productId: key,
@@ -272,10 +272,17 @@ export class DailyReportsService {
             productName: item.productName,
             unit: item.unit,
             quantity: 0,
+            saleQuantity: 0,
+            giftQuantity: 0,
             revenue: 0,
           };
-        p.quantity += Number(item.qty || 0);
-        p.revenue += Number(item.lineTotal || 0);
+        const quantity = Number(item.qty || 0);
+        p.quantity += quantity;
+        if (isGift) p.giftQuantity += quantity;
+        else {
+          p.saleQuantity += quantity;
+          p.revenue += Number(item.lineTotal || 0);
+        }
         products.set(key, p);
       }
     }
@@ -511,14 +518,25 @@ export class DailyReportsService {
       { header: 'Mã sản phẩm', key: 'productCode', width: 20 },
       { header: 'Tên sản phẩm', key: 'productName', width: 36 },
       { header: 'Đơn vị', key: 'unit', width: 12 },
-      { header: 'Số lượng', key: 'quantity', width: 14 },
+      { header: 'SL bán', key: 'saleQuantity', width: 12 },
+      { header: 'SL khuyến mãi', key: 'giftQuantity', width: 16 },
+      { header: 'Tổng SL', key: 'quantity', width: 12 },
       { header: 'Doanh thu', key: 'revenue', width: 18 },
     ];
-    (s.products || []).forEach((x: any, i: number) =>
-      products.addRow({ stt: i + 1, ...x }),
-    );
+    (s.products || []).forEach((x: any, i: number) => {
+      const giftQuantity = Number(x.giftQuantity || 0);
+      products.addRow({
+        stt: i + 1,
+        ...x,
+        saleQuantity:
+          x.saleQuantity === undefined
+            ? Math.max(0, Number(x.quantity || 0) - giftQuantity)
+            : x.saleQuantity,
+        giftQuantity,
+      });
+    });
     products.getRow(1).font = { bold: true };
-    products.autoFilter = { from: 'A1', to: 'F1' };
+    products.autoFilter = { from: 'A1', to: 'H1' };
     return Buffer.from(await book.xlsx.writeBuffer());
   }
 }
