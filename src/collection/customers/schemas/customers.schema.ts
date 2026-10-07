@@ -86,6 +86,7 @@ export class CustomerInteraction {
   @prop() interaction?: string;
   @prop() phone?: string;
   @prop() note?: string;
+  @prop({ default: false }) difficultCustomer?: boolean;
   @prop() occurredAt?: Date;
   @prop() createdBy?: string;
   @prop() importKey?: string;
@@ -119,6 +120,7 @@ export class Customers extends BaseModel {
   @prop() email?: string;
   @prop() address?: string;
   @prop({ default: false }) zaloConnected: boolean;
+  @prop({ default: false, index: true }) difficultCustomer: boolean;
   @prop({ enum: CustomerSource, default: CustomerSource.LEAD })
   source: CustomerSource;
   @prop({ enum: CustomerSegment, default: CustomerSegment.NEW_CUSTOMER })
@@ -169,6 +171,7 @@ export class InvoiceFollowUpDrafts extends BaseModel {
   interactionChannel: CustomerInteractionChannel;
   @prop() interaction?: string;
   @prop() note?: string;
+  @prop({ default: false }) difficultCustomer: boolean;
   @prop() salespersonName?: string;
   @prop() createdBy?: string;
   @prop() updatedBy?: string;

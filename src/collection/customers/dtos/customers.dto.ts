@@ -141,6 +141,7 @@ export class CreateInvoiceFollowUpDraftDto {
   interactionChannel?: CustomerInteractionChannel;
   @IsOptional() @IsString() interaction?: string;
   @IsOptional() @IsString() note?: string;
+  @IsOptional() @IsBoolean() difficultCustomer?: boolean;
   @IsOptional() @IsString() salespersonName?: string;
 }
 

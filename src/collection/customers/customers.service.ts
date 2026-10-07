@@ -520,7 +520,7 @@ export class CustomersService implements OnModuleInit {
       this.model
         .find(filter)
         .select(
-          'code codeStatus name phone phones email address source segment zaloConnected debt debtLimit invoiceCoinBalance plusExCoinBalance note createdAt updatedAt storeLocation.latitude storeLocation.longitude storefrontImage.url',
+          'code codeStatus name phone phones email address source segment zaloConnected difficultCustomer debt debtLimit invoiceCoinBalance plusExCoinBalance note createdAt updatedAt storeLocation.latitude storeLocation.longitude storefrontImage.url',
         )
         .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
@@ -813,7 +813,9 @@ export class CustomersService implements OnModuleInit {
     ];
     const customers: any[] = await this.model
       .find({ _id: { $in: customerIds }, isDeleted: false })
-      .select('code name phone phones zaloConnected interactions')
+      .select(
+        'code name phone phones zaloConnected difficultCustomer interactions',
+      )
       .lean();
     const customerMap = new Map(
       customers.map((customer) => [String(customer._id), customer]),
@@ -909,6 +911,10 @@ export class CustomersService implements OnModuleInit {
           ),
           interaction: tracking?.interaction || latest?.interaction || '',
           note: tracking?.note || latest?.note || '',
+          difficultCustomer:
+            tracking?.difficultCustomer ??
+            latest?.difficultCustomer ??
+            Boolean(customer?.difficultCustomer),
           lastUpdatedAt,
           followUpAt,
           needsFollowUp,
@@ -990,6 +996,10 @@ export class CustomersService implements OnModuleInit {
           ),
           interaction,
           note: tracking?.note || latest?.note || '',
+          difficultCustomer:
+            tracking?.difficultCustomer ??
+            latest?.difficultCustomer ??
+            Boolean(customer?.difficultCustomer),
           lastUpdatedAt,
           followUpAt,
           needsFollowUp:
@@ -1036,6 +1046,7 @@ export class CustomersService implements OnModuleInit {
           ),
           interaction: draft.interaction || '',
           note: draft.note || '',
+          difficultCustomer: Boolean(draft.difficultCustomer),
           lastUpdatedAt,
           followUpAt,
           needsFollowUp:
@@ -1093,6 +1104,8 @@ export class CustomersService implements OnModuleInit {
           (item: any) => item.invoiceStatus === 'DO_NOT_SEND',
         ).length,
         needsFollowUp: data.filter((item: any) => item.needsFollowUp).length,
+        difficultCustomer: data.filter((item: any) => item.difficultCustomer)
+          .length,
       },
     };
   }
@@ -1161,12 +1174,22 @@ export class CustomersService implements OnModuleInit {
         { $set: values, $setOnInsert: { createdBy: actorId } },
         { new: true, upsert: true },
       );
+      if (dto.customerId && dto.difficultCustomer !== undefined)
+        await this.model.updateOne(
+          { _id: dto.customerId, isDeleted: false },
+          { $set: { difficultCustomer: Boolean(dto.difficultCustomer) } },
+        );
       return { data: draft };
     }
     const draft = await this.invoiceFollowUpDraftModel.create({
       ...values,
       createdBy: actorId,
     });
+    if (dto.customerId && dto.difficultCustomer !== undefined)
+      await this.model.updateOne(
+        { _id: dto.customerId, isDeleted: false },
+        { $set: { difficultCustomer: Boolean(dto.difficultCustomer) } },
+      );
     return { data: draft };
   }
 
@@ -1210,6 +1233,12 @@ export class CustomersService implements OnModuleInit {
       { new: true },
     );
     if (!draft) throw new NotFoundException('Không tìm thấy dòng tạm');
+    const customerId = dto.customerId || existing.customerId;
+    if (customerId && dto.difficultCustomer !== undefined)
+      await this.model.updateOne(
+        { _id: customerId, isDeleted: false },
+        { $set: { difficultCustomer: Boolean(dto.difficultCustomer) } },
+      );
     return { data: draft };
   }
 
@@ -1268,6 +1297,7 @@ export class CustomersService implements OnModuleInit {
                   interaction: row.interaction || undefined,
                   phone: row.phone || undefined,
                   note: row.note || undefined,
+                  difficultCustomer: Boolean(row.difficultCustomer),
                   invoiceId: row.invoiceId || undefined,
                   invoiceCode: row.invoiceCode || undefined,
                   documentType: row.documentType || undefined,
@@ -1277,9 +1307,12 @@ export class CustomersService implements OnModuleInit {
                   createdBy: actorId,
                 },
               },
-              ...(row.zaloStatus
-                ? { $set: { zaloConnected: row.zaloStatus === 'CONNECTED' } }
-                : {}),
+              $set: {
+                ...(row.zaloStatus
+                  ? { zaloConnected: row.zaloStatus === 'CONNECTED' }
+                  : {}),
+                difficultCustomer: Boolean(row.difficultCustomer),
+              },
             },
           },
         })),
@@ -1318,6 +1351,7 @@ export class CustomersService implements OnModuleInit {
       { header: 'TƯƠNG TÁC', key: 'interaction', width: 24 },
       { header: 'SỐ ĐIỆN THOẠI', key: 'phone', width: 18 },
       { header: 'NOTE', key: 'note', width: 35 },
+      { header: 'KHÁCH HÀNG KHÓ', key: 'difficultCustomerLabel', width: 24 },
       { header: 'SALE', key: 'salespersonName', width: 24 },
       { header: 'NGÀY', key: 'invoiceDate', width: 18 },
       { header: 'CẦN CẬP NHẬT 24H', key: 'needsFollowUp', width: 20 },
@@ -1348,6 +1382,9 @@ export class CustomersService implements OnModuleInit {
               ? 'SMS'
               : 'ZALO',
         needsFollowUp: item.needsFollowUp ? 'CẦN CẬP NHẬT' : '',
+        difficultCustomerLabel: item.difficultCustomer
+          ? 'KHÁCH HÀNG KHÓ - SALE LÀM VIỆC'
+          : '',
       }),
     );
     sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -1357,7 +1394,7 @@ export class CustomersService implements OnModuleInit {
       fgColor: { argb: 'FF315F50' },
     };
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
-    sheet.autoFilter = { from: 'A1', to: 'L1' };
+    sheet.autoFilter = { from: 'A1', to: 'N1' };
     return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 

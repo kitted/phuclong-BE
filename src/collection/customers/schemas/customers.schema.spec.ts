@@ -16,7 +16,10 @@ describe('Customers phone schema', () => {
       { code: 1 },
       {
         unique: true,
-        partialFilterExpression: { isDeleted: false, code: { $type: 'string' } },
+        partialFilterExpression: {
+          isDeleted: false,
+          code: { $type: 'string' },
+        },
         background: true,
       },
     ]);
@@ -32,9 +35,19 @@ describe('Customers phone schema', () => {
 
   it('stores imported interaction snapshots and idempotency key', () => {
     expect(schema.path('interactions').schema.path('zaloStatus')).toBeDefined();
-    expect(schema.path('interactions').schema.path('invoiceStatus')).toBeDefined();
+    expect(
+      schema.path('interactions').schema.path('invoiceStatus'),
+    ).toBeDefined();
     expect(schema.path('interactions').schema.path('occurredAt')).toBeDefined();
     expect(schema.path('interactions').schema.path('importKey')).toBeDefined();
+    expect(
+      schema.path('interactions').schema.path('difficultCustomer'),
+    ).toBeDefined();
+  });
+
+  it('persists the difficult-customer marker on the customer profile', () => {
+    expect(schema.path('difficultCustomer')).toBeDefined();
+    expect(schema.path('difficultCustomer').options.default).toBe(false);
   });
 
   it('stores storefront location as GeoJSON and indexes it', () => {
@@ -61,5 +74,6 @@ describe('Invoice follow-up draft schema', () => {
   it('stores the selected interaction channel', () => {
     expect(schema.path('interactionChannel')).toBeDefined();
     expect(schema.path('interactionChannel').options.default).toBe('ZALO');
+    expect(schema.path('difficultCustomer')).toBeDefined();
   });
 });
