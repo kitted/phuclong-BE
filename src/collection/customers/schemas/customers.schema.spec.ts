@@ -50,6 +50,10 @@ describe('Customers phone schema', () => {
     expect(schema.path('difficultCustomer').options.default).toBe(false);
   });
 
+  it('supports the legacy-customer segment separately from customer source', () => {
+    expect(schema.path('segment').options.enum).toContain('LEGACY');
+  });
+
   it('stores storefront location as GeoJSON and indexes it', () => {
     expect(schema.path('storeLocation.latitude')).toBeDefined();
     expect(schema.path('storeLocation.longitude')).toBeDefined();

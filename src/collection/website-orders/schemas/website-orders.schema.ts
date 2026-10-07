@@ -45,7 +45,8 @@ export class WebsiteOrderItem {
 }
 
 export class WebsiteOrderStatusHistory {
-  @prop({ required: true, enum: WebsiteOrderStatus }) status: WebsiteOrderStatus;
+  @prop({ required: true, enum: WebsiteOrderStatus })
+  status: WebsiteOrderStatus;
   @prop({ required: true }) at: Date;
   @prop() by?: string;
   @prop() note?: string;
@@ -56,29 +57,42 @@ export class WebsiteOrderStatusHistory {
 @index({ customerPhone: 1, createdAt: -1 })
 export class WebsiteOrders extends BaseModel {
   @prop({ required: true }) code: string;
-  @prop({ required: true, enum: WebsiteCustomerType }) customerType: WebsiteCustomerType;
+  @prop({ required: true, enum: WebsiteCustomerType })
+  customerType: WebsiteCustomerType;
   @prop() customerId?: string;
+  @prop() customerCode?: string;
   @prop({ required: true }) customerName: string;
   @prop({ required: true }) customerPhone: string;
   @prop() customerEmail?: string;
   @prop({ required: true }) deliveryAddress: string;
   @prop() customerNote?: string;
-  @prop({ type: () => [WebsiteOrderItem], default: [] }) items: WebsiteOrderItem[];
+  @prop({ type: () => [WebsiteOrderItem], default: [] })
+  items: WebsiteOrderItem[];
   @prop({ required: true, min: 0 }) subtotal: number;
   @prop({ default: 0, min: 0 }) discountAmount: number;
   @prop({ default: 0, min: 0 }) shippingFee: number;
   @prop({ required: true, min: 0 }) totalAmount: number;
-  @prop({ required: true, enum: WebsitePaymentMethod }) paymentMethod: WebsitePaymentMethod;
-  @prop({ required: true, enum: WebsitePaymentStatus, default: WebsitePaymentStatus.UNPAID })
+  @prop({ required: true, enum: WebsitePaymentMethod })
+  paymentMethod: WebsitePaymentMethod;
+  @prop({
+    required: true,
+    enum: WebsitePaymentStatus,
+    default: WebsitePaymentStatus.UNPAID,
+  })
   paymentStatus: WebsitePaymentStatus;
-  @prop({ required: true, enum: WebsiteOrderStatus, default: WebsiteOrderStatus.PENDING })
+  @prop({
+    required: true,
+    enum: WebsiteOrderStatus,
+    default: WebsiteOrderStatus.PENDING,
+  })
   status: WebsiteOrderStatus;
   @prop() assignedSaleId?: string;
   @prop() assignedAt?: Date;
   @prop() assignedBy?: string;
   @prop() invoiceId?: string;
   @prop() invoiceCode?: string;
-  @prop({ enum: WebsiteOrderConversionStatus }) conversionStatus?: WebsiteOrderConversionStatus;
+  @prop({ enum: WebsiteOrderConversionStatus })
+  conversionStatus?: WebsiteOrderConversionStatus;
   @prop() conversionIdempotencyKeyHash?: string;
   @prop() conversionStartedAt?: Date;
   @prop() convertedAt?: Date;

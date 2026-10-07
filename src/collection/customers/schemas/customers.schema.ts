@@ -8,6 +8,7 @@ export enum CustomerSource {
   NEW = 'NEW',
 }
 export enum CustomerSegment {
+  LEGACY = 'LEGACY',
   TEMPORARILY_INACTIVE = 'TEMPORARILY_INACTIVE',
   ACTIVE = 'ACTIVE',
   HIGHLY_ACTIVE = 'HIGHLY_ACTIVE',

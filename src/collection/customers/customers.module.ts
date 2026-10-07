@@ -13,6 +13,7 @@ import { CustomerDebtLedger } from '../debt-payments/schemas/customer-debt-ledge
 import { Users } from '../users/schemas/users.schema';
 import { DebtPayments } from '../debt-payments/schemas/debt-payments.schema';
 import { CustomerReturns } from '../customer-returns/schemas/customer-returns.schema';
+import { WebsiteOrders } from '../website-orders/schemas/website-orders.schema';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { CustomerReturns } from '../customer-returns/schemas/customer-returns.sc
       Invoices,
       DebtPayments,
       CustomerReturns,
+      WebsiteOrders,
       Vouchers,
       CustomerDebtLedger,
       Users,

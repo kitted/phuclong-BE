@@ -71,6 +71,16 @@ export class CustomersController {
     return this.service.summary();
   }
 
+  @Post('classify-legacy')
+  @AdminOnly()
+  @ApiOperation({
+    summary:
+      'Scan and classify customers with 3+ matching transactions as legacy',
+  })
+  classifyLegacy(@Body('apply') apply?: boolean) {
+    return this.service.classifyLegacyCustomers(Boolean(apply));
+  }
+
   @Get('export')
   @ApiOperation({ summary: 'Export all customers to XLSX' })
   @ApiProduces(

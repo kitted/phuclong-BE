@@ -54,6 +54,10 @@ import { ImportCustomerInteractionRowDto } from './dtos/customers.dto';
 import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
 import { RoleEnum } from '../users/interfaces/role.enum';
 import { parseBusinessDate } from '../../core/business-date';
+import {
+  WebsiteOrders,
+  WebsiteOrderStatus,
+} from '../website-orders/schemas/website-orders.schema';
 
 export function normalizePhones(value?: unknown): string[] {
   return String(value ?? '')
@@ -82,6 +86,7 @@ const SOURCE_LABELS: Record<CustomerSource, string> = {
   NEW: 'Khách mới',
 };
 const SEGMENT_LABELS: Record<CustomerSegment, string> = {
+  LEGACY: 'Khách cũ',
   TEMPORARILY_INACTIVE: 'Tạm ngừng hoạt động',
   ACTIVE: 'Đang hoạt động',
   HIGHLY_ACTIVE: 'Hoạt động tốt',
@@ -106,6 +111,8 @@ const SOURCE_ALIASES: Record<string, CustomerSource> = {
   'KHACH MOI': CustomerSource.NEW,
 };
 const SEGMENT_ALIASES: Record<string, CustomerSegment> = {
+  LEGACY: CustomerSegment.LEGACY,
+  'KHACH CU': CustomerSegment.LEGACY,
   TEMPORARILY_INACTIVE: CustomerSegment.TEMPORARILY_INACTIVE,
   'NGU QUEN 31-89 NGAY': CustomerSegment.TEMPORARILY_INACTIVE,
   ACTIVE: CustomerSegment.ACTIVE,
@@ -185,6 +192,8 @@ export class CustomersService implements OnModuleInit {
     private readonly customerReturnModel: ReturnModelType<
       typeof CustomerReturns
     >,
+    @InjectModel(WebsiteOrders)
+    private readonly websiteOrderModel: ReturnModelType<typeof WebsiteOrders>,
     @InjectModel(Vouchers)
     private readonly voucherModel: ReturnModelType<typeof Vouchers>,
     @InjectModel(CustomerDebtLedger)
@@ -673,6 +682,154 @@ export class CustomersService implements OnModuleInit {
           (x) => (x.debtLimit || 0) > 0 && (x.debt || 0) >= x.debtLimit,
         ).length,
         totalDebt: rows.reduce((sum, x) => sum + (x.debt || 0), 0),
+      },
+    };
+  }
+
+  private normalizedPhoneExpression(field: string): any {
+    const stripped = [' ', '-', '.', '(', ')', '+'].reduce(
+      (input: any, value) => ({
+        $replaceAll: { input, find: value, replacement: '' },
+      }),
+      { $ifNull: [field, ''] },
+    );
+    return {
+      $let: {
+        vars: { phone: stripped },
+        in: {
+          $cond: [
+            { $eq: [{ $substrCP: ['$$phone', 0, 1] }, '0'] },
+            '$$phone',
+            {
+              $cond: [
+                { $gt: [{ $strLenCP: '$$phone' }, 0] },
+                { $concat: ['0', '$$phone'] },
+                '',
+              ],
+            },
+          ],
+        },
+      },
+    };
+  }
+
+  async classifyLegacyCustomers(apply = false) {
+    const invoicePhone = this.normalizedPhoneExpression('$customerPhone');
+    const orderPhone = this.normalizedPhoneExpression('$customerPhone');
+    const [customers, invoiceCounts, orderCounts] = await Promise.all([
+      this.model
+        .find({ isDeleted: false })
+        .select('_id code name phone phones source segment')
+        .lean(),
+      this.invoiceModel.aggregate([
+        {
+          $match: {
+            isDeleted: false,
+            status: { $ne: 'REVERSED' },
+            customerCode: { $type: 'string', $ne: '' },
+            customerPhone: { $type: 'string', $ne: '' },
+          },
+        },
+        {
+          $group: {
+            _id: {
+              code: { $toUpper: { $trim: { input: '$customerCode' } } },
+              phone: invoicePhone,
+            },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      this.websiteOrderModel.aggregate([
+        {
+          $match: {
+            isDeleted: false,
+            status: { $ne: WebsiteOrderStatus.CANCELLED },
+            customerCode: { $type: 'string', $ne: '' },
+            customerPhone: { $type: 'string', $ne: '' },
+            $or: [
+              { invoiceId: { $exists: false } },
+              { invoiceId: null },
+              { invoiceId: '' },
+            ],
+          },
+        },
+        {
+          $group: {
+            _id: {
+              code: { $toUpper: { $trim: { input: '$customerCode' } } },
+              phone: orderPhone,
+            },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+    const counts = new Map<string, number>();
+    [...invoiceCounts, ...orderCounts].forEach((row: any) => {
+      const key = `${row._id?.code || ''}|${row._id?.phone || ''}`;
+      counts.set(key, (counts.get(key) || 0) + Number(row.count || 0));
+    });
+    const candidates = customers
+      .map((customer: any) => {
+        const code = String(customer.code || '')
+          .trim()
+          .toUpperCase();
+        const phones = normalizePhones(
+          [customer.phone, ...(customer.phones || [])]
+            .filter(Boolean)
+            .join('|'),
+        );
+        const orderCount = code
+          ? Math.max(
+              0,
+              ...phones.map((phone) => counts.get(`${code}|${phone}`) || 0),
+            )
+          : 0;
+        const qualifies = orderCount >= 3;
+        const alreadyLegacy = customer.source === CustomerSource.LEGACY;
+        const shouldClassify = qualifies || alreadyLegacy;
+        return {
+          id: String(customer._id),
+          code,
+          name: customer.name,
+          phone: phones[0] || '',
+          orderCount,
+          qualifies,
+          alreadyLegacy,
+          shouldClassify,
+          needsUpdate:
+            shouldClassify &&
+            (customer.source !== CustomerSource.LEGACY ||
+              customer.segment !== CustomerSegment.LEGACY),
+        };
+      })
+      .filter((item) => item.shouldClassify);
+    const updates = candidates.filter((item) => item.needsUpdate);
+    if (apply && updates.length) {
+      await this.model.bulkWrite(
+        updates.map((item) => ({
+          updateOne: {
+            filter: { _id: item.id, isDeleted: false },
+            update: {
+              $set: {
+                source: CustomerSource.LEGACY,
+                segment: CustomerSegment.LEGACY,
+              },
+            },
+          },
+        })),
+      );
+    }
+    return {
+      data: {
+        scanned: customers.length,
+        matchedByOrders: candidates.filter((item) => item.qualifies).length,
+        existingLegacy: candidates.filter((item) => item.alreadyLegacy).length,
+        updateCount: updates.length,
+        updated: apply ? updates.length : 0,
+        applied: apply,
+        sample: updates.slice(0, 20),
       },
     };
   }

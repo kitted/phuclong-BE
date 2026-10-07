@@ -576,6 +576,7 @@ export class WebsiteOrdersService {
       code,
       customerType: dto.customerType,
       customerId,
+      customerCode: dto.customerCode?.trim().toUpperCase(),
       customerName: dto.customerName.trim(),
       customerPhone: this.normalizePhone(dto.customerPhone),
       customerEmail: dto.customerEmail?.trim(),
