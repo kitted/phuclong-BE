@@ -45,6 +45,7 @@ import {
 import { resolveReportPeriod } from './report-period';
 import { RoleEnum } from '../users/interfaces/role.enum';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
+import { Types } from 'mongoose';
 export type DashboardActor = { id?: string; role?: RoleEnum };
 @Injectable()
 export class DashboardService {
@@ -574,6 +575,111 @@ export class DashboardService {
       meta: { type, limit, slowMovingDays: slowDays },
     };
   }
+  async newCustomers(
+    query: DashboardPeriodQueryDto,
+    actor: DashboardActor,
+  ): Promise<any> {
+    const days = Math.min(365, Math.max(1, Number(query.days) || 45));
+    const limit = Math.min(500, Math.max(1, Number(query.limit) || 200));
+    const to = new Date();
+    const from = new Date(to.getTime() - days * 86400000);
+    const match: any = {
+      isDeleted: false,
+      status: { $ne: 'REVERSED' },
+      date: { $gte: from, $lte: to },
+      customerId: { $ne: null },
+    };
+    const salespersonId = this.scope(query, actor);
+    if (salespersonId && Types.ObjectId.isValid(salespersonId))
+      match.salespersonId = new Types.ObjectId(salespersonId);
+    const count =
+      query.invoiceCount === '1' || query.invoiceCount === '2'
+        ? Number(query.invoiceCount)
+        : undefined;
+    const grouped: any[] = await this.invoices.aggregate([
+      { $match: match },
+      { $sort: { date: -1, createdAt: -1 } },
+      {
+        $group: {
+          _id: '$customerId',
+          invoiceCount: { $sum: 1 },
+          totalRevenue: {
+            $sum: {
+              $ifNull: ['$grandTotal', { $ifNull: ['$totalAmount', 0] }],
+            },
+          },
+          firstInvoiceAt: { $min: '$date' },
+          latestInvoiceAt: { $max: '$date' },
+          latestInvoiceCode: { $first: '$code' },
+          customerCodeSnapshot: { $first: '$customerCode' },
+          customerNameSnapshot: { $first: '$customerName' },
+          customerPhoneSnapshot: { $first: '$customerPhone' },
+          salespersonNames: { $addToSet: '$salespersonName' },
+        },
+      },
+      {
+        $match: count
+          ? { invoiceCount: count }
+          : { invoiceCount: { $gte: 1, $lte: 2 } },
+      },
+      { $sort: { latestInvoiceAt: -1 } },
+      { $limit: limit },
+    ]);
+    const customerIds = grouped
+      .map((item) => item._id)
+      .filter((id) => Types.ObjectId.isValid(String(id)));
+    const customerDocs: any[] = await this.customers
+      .find({ _id: { $in: customerIds }, isDeleted: false })
+      .select('code name phone phones address source segment createdAt')
+      .lean();
+    const customerMap = new Map(
+      customerDocs.map((customer) => [String(customer._id), customer]),
+    );
+    const keyword = String(query.search || '')
+      .trim()
+      .toLocaleLowerCase('vi');
+    const data = grouped
+      .map((item) => {
+        const customer: any = customerMap.get(String(item._id)) || {};
+        return {
+          id: String(item._id),
+          customerCode: customer.code || item.customerCodeSnapshot,
+          customerName:
+            customer.name || item.customerNameSnapshot || 'Khách hàng',
+          phone:
+            customer.phone ||
+            customer.phones?.[0] ||
+            item.customerPhoneSnapshot,
+          address: customer.address,
+          source: customer.source,
+          segment: customer.segment,
+          customerCreatedAt: customer.createdAt,
+          invoiceCount: item.invoiceCount,
+          totalRevenue: Number(item.totalRevenue || 0),
+          firstInvoiceAt: item.firstInvoiceAt,
+          latestInvoiceAt: item.latestInvoiceAt,
+          latestInvoiceCode: item.latestInvoiceCode,
+          salespersonNames: (item.salespersonNames || []).filter(Boolean),
+        };
+      })
+      .filter((item) =>
+        keyword
+          ? `${item.customerCode || ''} ${item.customerName || ''} ${item.phone || ''}`
+              .toLocaleLowerCase('vi')
+              .includes(keyword)
+          : true,
+      );
+    return {
+      data,
+      meta: {
+        days,
+        from,
+        to,
+        invoiceCount: query.invoiceCount || 'ALL',
+        total: data.length,
+      },
+    };
+  }
   async topProducts(
     query: DashboardPeriodQueryDto,
     actor: DashboardActor,
@@ -636,7 +742,10 @@ export class DashboardService {
         ])
       : [[], []];
     const adminImages = new Map(
-      productImages.map((product: any) => [String(product._id), product.imageUrl]),
+      productImages.map((product: any) => [
+        String(product._id),
+        product.imageUrl,
+      ]),
     );
     const websiteImages = new Map(
       websiteProducts.map((product: any) => [
