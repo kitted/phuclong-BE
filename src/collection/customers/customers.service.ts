@@ -64,8 +64,12 @@ export function normalizePhones(value?: unknown): string[] {
     .filter((phone, index, values) => values.indexOf(phone) === index);
 }
 
-export function normalizeInteractionChannel(value?: unknown): CustomerInteractionChannel {
-  const channel = String(value || '').trim().toUpperCase();
+export function normalizeInteractionChannel(
+  value?: unknown,
+): CustomerInteractionChannel {
+  const channel = String(value || '')
+    .trim()
+    .toUpperCase();
   if (['PHONE', 'CALL', 'CALLING', 'GOI_DIEN'].includes(channel))
     return CustomerInteractionChannel.PHONE;
   if (channel === 'SMS') return CustomerInteractionChannel.SMS;
@@ -1083,8 +1087,11 @@ export class CustomersService implements OnModuleInit {
         ).length,
         manualCount: draftData.length,
         sent: data.filter((item: any) => item.invoiceStatus === 'SENT').length,
-        notSent: data.filter((item: any) => item.invoiceStatus !== 'SENT')
+        notSent: data.filter((item: any) => item.invoiceStatus === 'NOT_SENT')
           .length,
+        doNotSend: data.filter(
+          (item: any) => item.invoiceStatus === 'DO_NOT_SEND',
+        ).length,
         needsFollowUp: data.filter((item: any) => item.needsFollowUp).length,
       },
     };
@@ -1254,9 +1261,7 @@ export class CustomersService implements OnModuleInit {
                 interactions: {
                   at: new Date(),
                   occurredAt: new Date(),
-                  channel: normalizeInteractionChannel(
-                    row.interactionChannel,
-                  ),
+                  channel: normalizeInteractionChannel(row.interactionChannel),
                   action: 'Chốt sổ theo dõi gửi hóa đơn điện tử',
                   zaloStatus: row.zaloStatus,
                   invoiceStatus: row.invoiceStatus,
@@ -1330,7 +1335,12 @@ export class CustomersService implements OnModuleInit {
                 : 'DÒNG TẠM',
         zaloStatus:
           item.zaloStatus === 'CONNECTED' ? 'ĐÃ KẾT BẠN' : 'CHƯA KẾT BẠN',
-        invoiceStatus: item.invoiceStatus === 'SENT' ? 'ĐÃ GỬI' : 'CHƯA GỬI',
+        invoiceStatus:
+          item.invoiceStatus === 'SENT'
+            ? 'ĐÃ GỬI'
+            : item.invoiceStatus === 'DO_NOT_SEND'
+              ? 'KHÔNG GỬI'
+              : 'CHƯA GỬI',
         interactionChannelLabel:
           normalizeInteractionChannel(item.interactionChannel) === 'PHONE'
             ? 'GỌI ĐIỆN'
@@ -1572,7 +1582,7 @@ export class CustomersService implements OnModuleInit {
           throw new Error('Tình trạng Zalo không hợp lệ');
         if (
           row.invoiceStatus &&
-          !['SENT', 'NOT_SENT'].includes(row.invoiceStatus)
+          !['SENT', 'NOT_SENT', 'DO_NOT_SEND'].includes(row.invoiceStatus)
         )
           throw new Error('Tình trạng gửi hóa đơn không hợp lệ');
         if (
@@ -1716,9 +1726,11 @@ export class CustomersService implements OnModuleInit {
         invoiceStatus:
           row.invoiceStatus === 'SENT'
             ? 'ĐÃ GỬI'
-            : row.invoiceStatus === 'NOT_SENT'
+            : row.invoiceStatus === 'DO_NOT_SEND'
               ? 'KHÔNG GỬI'
-              : '',
+              : row.invoiceStatus === 'NOT_SENT'
+                ? 'CHƯA GỬI'
+                : '',
         occurredAt: row.occurredAt ? new Date(row.occurredAt) : null,
       });
     sheet.getRow(1).font = { bold: true };
@@ -1734,7 +1746,7 @@ export class CustomersService implements OnModuleInit {
     (sheet as any).dataValidations.add('D2:D10001', {
       type: 'list',
       allowBlank: true,
-      formulae: ['"ĐÃ GỬI,KHÔNG GỬI"'],
+      formulae: ['"ĐÃ GỬI,CHƯA GỬI,KHÔNG GỬI"'],
     });
     return Buffer.from(await workbook.xlsx.writeBuffer());
   }

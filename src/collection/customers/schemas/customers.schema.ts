@@ -22,6 +22,7 @@ export enum CustomerZaloStatus {
 export enum CustomerInvoiceSendStatus {
   SENT = 'SENT',
   NOT_SENT = 'NOT_SENT',
+  DO_NOT_SEND = 'DO_NOT_SEND',
 }
 export enum CustomerInteractionChannel {
   ZALO = 'ZALO',
