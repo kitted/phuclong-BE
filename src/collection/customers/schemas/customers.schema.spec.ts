@@ -1,5 +1,5 @@
 import { buildSchema } from '@typegoose/typegoose';
-import { Customers } from './customers.schema';
+import { Customers, InvoiceFollowUpDrafts } from './customers.schema';
 
 describe('Customers phone schema', () => {
   const schema = buildSchema(Customers);
@@ -52,5 +52,14 @@ describe('Customers phone schema', () => {
     expect(schema.path('storefrontImage.url')).toBeDefined();
     expect(schema.path('storefrontImage.publicId')).toBeDefined();
     expect(schema.path('storefrontImage.uploadedBy')).toBeDefined();
+  });
+});
+
+describe('Invoice follow-up draft schema', () => {
+  const schema = buildSchema(InvoiceFollowUpDrafts);
+
+  it('stores the selected interaction channel', () => {
+    expect(schema.path('interactionChannel')).toBeDefined();
+    expect(schema.path('interactionChannel').options.default).toBe('ZALO');
   });
 });

@@ -23,6 +23,11 @@ export enum CustomerInvoiceSendStatus {
   SENT = 'SENT',
   NOT_SENT = 'NOT_SENT',
 }
+export enum CustomerInteractionChannel {
+  ZALO = 'ZALO',
+  PHONE = 'PHONE',
+  SMS = 'SMS',
+}
 export enum StoreLocationSource {
   GPS = 'GPS',
   MAP = 'MAP',
@@ -83,6 +88,11 @@ export class CustomerInteraction {
   @prop() occurredAt?: Date;
   @prop() createdBy?: string;
   @prop() importKey?: string;
+  @prop() invoiceId?: string;
+  @prop() invoiceCode?: string;
+  @prop() documentType?: string;
+  @prop() documentId?: string;
+  @prop() documentCode?: string;
 }
 
 @index({ phone: 1 })
@@ -129,4 +139,48 @@ export class Customers extends BaseModel {
 export class CustomerCounters {
   @prop({ required: true, unique: true }) key: string;
   @prop({ required: true, default: 0 }) sequence: number;
+}
+
+@index({ date: 1, isDeleted: 1 })
+export class InvoiceFollowUpDrafts extends BaseModel {
+  @prop({ required: true, index: true }) date: Date;
+  @prop({ index: true }) invoiceId?: string;
+  @prop() customerId?: string;
+  @prop({ enum: ['INVOICE', 'DEBT_PAYMENT', 'CUSTOMER_RETURN'] })
+  documentType?: string;
+  @prop({ index: true }) documentId?: string;
+  @prop() documentCode?: string;
+  @prop() customerCode?: string;
+  @prop({ required: true }) customerName: string;
+  @prop() phone?: string;
+  @prop() invoiceCode?: string;
+  @prop({ enum: CustomerZaloStatus, default: CustomerZaloStatus.NOT_CONNECTED })
+  zaloStatus: CustomerZaloStatus;
+  @prop({
+    enum: CustomerInvoiceSendStatus,
+    default: CustomerInvoiceSendStatus.NOT_SENT,
+  })
+  invoiceStatus: CustomerInvoiceSendStatus;
+  @prop({
+    enum: CustomerInteractionChannel,
+    default: CustomerInteractionChannel.ZALO,
+  })
+  interactionChannel: CustomerInteractionChannel;
+  @prop() interaction?: string;
+  @prop() note?: string;
+  @prop() salespersonName?: string;
+  @prop() createdBy?: string;
+  @prop() updatedBy?: string;
+  @prop() lastUpdatedAt?: Date;
+}
+
+@index({ date: 1 }, { unique: true })
+export class InvoiceFollowUpBooks extends BaseModel {
+  @prop({ required: true, unique: true }) date: Date;
+  @prop({ required: true, default: false }) isFinalized: boolean;
+  @prop() finalizedAt?: Date;
+  @prop() finalizedBy?: string;
+  @prop({ default: 0 }) sourceInvoiceCount: number;
+  @prop({ default: 0 }) trackedInvoiceCount: number;
+  @prop({ default: 0 }) interactionCount: number;
 }

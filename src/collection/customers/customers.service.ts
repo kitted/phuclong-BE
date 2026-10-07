@@ -14,17 +14,25 @@ import { Connection } from 'mongoose';
 import {
   CustomerCodeStatus,
   CustomerCounters,
+  CustomerInteractionChannel,
   Customers,
+  InvoiceFollowUpBooks,
+  InvoiceFollowUpDrafts,
 } from './schemas/customers.schema';
 import {
+  CreateInvoiceFollowUpDraftDto,
   CreateCustomerDto,
   CreateInteractionDto,
   CustomerDebtHistoryQueryDto,
   CustomerQueryDto,
+  DailyInvoiceFollowUpQueryDto,
+  UpdateInvoiceFollowUpDraftDto,
   UpdateCustomerDto,
   UpdateCustomerStoreProfileDto,
 } from './dtos/customers.dto';
 import { Invoices } from '../invoices/schemas/invoices.schema';
+import { DebtPayments } from '../debt-payments/schemas/debt-payments.schema';
+import { CustomerReturns } from '../customer-returns/schemas/customer-returns.schema';
 import { Vouchers } from '../promotions/schemas/promotions.schema';
 import * as ExcelJS from 'exceljs';
 import {
@@ -54,6 +62,14 @@ export function normalizePhones(value?: unknown): string[] {
     .filter(Boolean)
     .map((phone) => (phone.startsWith('0') ? phone : `0${phone}`))
     .filter((phone, index, values) => values.indexOf(phone) === index);
+}
+
+export function normalizeInteractionChannel(value?: unknown): CustomerInteractionChannel {
+  const channel = String(value || '').trim().toUpperCase();
+  if (['PHONE', 'CALL', 'CALLING', 'GOI_DIEN'].includes(channel))
+    return CustomerInteractionChannel.PHONE;
+  if (channel === 'SMS') return CustomerInteractionChannel.SMS;
+  return CustomerInteractionChannel.ZALO;
 }
 
 const SOURCE_LABELS: Record<CustomerSource, string> = {
@@ -149,8 +165,22 @@ export class CustomersService implements OnModuleInit {
     private readonly model: ReturnModelType<typeof Customers>,
     @InjectModel(CustomerCounters)
     private readonly counterModel: ReturnModelType<typeof CustomerCounters>,
+    @InjectModel(InvoiceFollowUpDrafts)
+    private readonly invoiceFollowUpDraftModel: ReturnModelType<
+      typeof InvoiceFollowUpDrafts
+    >,
+    @InjectModel(InvoiceFollowUpBooks)
+    private readonly invoiceFollowUpBookModel: ReturnModelType<
+      typeof InvoiceFollowUpBooks
+    >,
     @InjectModel(Invoices)
     private readonly invoiceModel: ReturnModelType<typeof Invoices>,
+    @InjectModel(DebtPayments)
+    private readonly debtPaymentModel: ReturnModelType<typeof DebtPayments>,
+    @InjectModel(CustomerReturns)
+    private readonly customerReturnModel: ReturnModelType<
+      typeof CustomerReturns
+    >,
     @InjectModel(Vouchers)
     private readonly voucherModel: ReturnModelType<typeof Vouchers>,
     @InjectModel(CustomerDebtLedger)
@@ -699,14 +729,626 @@ export class CustomersService implements OnModuleInit {
     };
   }
 
-  async addInteraction(id: string, dto: CreateInteractionDto) {
+  async addInteraction(
+    id: string,
+    dto: CreateInteractionDto,
+    actorId?: string,
+  ) {
+    const occurredAt = dto.occurredAt ? new Date(dto.occurredAt) : new Date();
+    const interaction = {
+      ...dto,
+      occurredAt,
+      at: new Date(),
+      createdBy: actorId,
+    };
+    const update: any = { $push: { interactions: interaction } };
+    if (dto.zaloStatus)
+      update.$set = { zaloConnected: dto.zaloStatus === 'CONNECTED' };
     const customer = await this.model.findOneAndUpdate(
       { _id: id, isDeleted: false },
-      { $push: { interactions: { ...dto, at: new Date() } } },
+      update,
       { new: true },
     );
     if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
     return { data: customer.interactions[customer.interactions.length - 1] };
+  }
+
+  async dailyInvoiceFollowUps(q: DailyInvoiceFollowUpQueryDto) {
+    const filter: any = {
+      isDeleted: false,
+      status: { $ne: 'REVERSED' },
+      date: {
+        $gte: vietnamDateBoundary(q.date, false),
+        $lte: vietnamDateBoundary(q.date, true),
+      },
+    };
+    if (q.salespersonId) filter.salespersonId = q.salespersonId;
+    const invoices: any[] = await this.invoiceModel
+      .find(filter)
+      .select(
+        'code date customerId customerCode customerName customerPhone salespersonId salespersonCode salespersonName grandTotal totalAmount',
+      )
+      .sort({ date: 1, code: 1 })
+      .lean();
+    const [debtPayments, customerReturns]: any[][] = await Promise.all([
+      this.debtPaymentModel
+        .find({
+          isDeleted: false,
+          status: 'ACTIVE',
+          date: {
+            $gte: vietnamDateBoundary(q.date, false),
+            $lte: vietnamDateBoundary(q.date, true),
+          },
+        })
+        .select(
+          'code date customerId customerCode customerName customerPhone collectorId collectorCode collectorName amount',
+        )
+        .sort({ date: 1, code: 1 })
+        .lean(),
+      this.customerReturnModel
+        .find({
+          isDeleted: false,
+          status: 'COMPLETED',
+          createdAt: {
+            $gte: vietnamDateBoundary(q.date, false),
+            $lte: vietnamDateBoundary(q.date, true),
+          },
+        })
+        .select(
+          'code createdAt customerId customerCode customerName customerPhone createdBy returnAmount',
+        )
+        .sort({ createdAt: 1, code: 1 })
+        .lean(),
+    ]);
+    const customerIds = [
+      ...new Set(
+        [...invoices, ...debtPayments, ...customerReturns]
+          .map((item) => (item.customerId ? String(item.customerId) : ''))
+          .filter(Boolean),
+      ),
+    ];
+    const customers: any[] = await this.model
+      .find({ _id: { $in: customerIds }, isDeleted: false })
+      .select('code name phone phones zaloConnected interactions')
+      .lean();
+    const customerMap = new Map(
+      customers.map((customer) => [String(customer._id), customer]),
+    );
+    const drafts: any[] = await this.invoiceFollowUpDraftModel
+      .find({
+        isDeleted: false,
+        date: {
+          $gte: vietnamDateBoundary(q.date, false),
+          $lte: vietnamDateBoundary(q.date, true),
+        },
+      })
+      .sort({ createdAt: 1, _id: 1 })
+      .lean();
+    const book: any = await this.invoiceFollowUpBookModel
+      .findOne({
+        date: {
+          $gte: vietnamDateBoundary(q.date, false),
+          $lte: vietnamDateBoundary(q.date, true),
+        },
+      })
+      .lean();
+    const draftByDocument = new Map(
+      drafts
+        .filter((draft) => draft.documentId || draft.invoiceId)
+        .map((draft) => [
+          `${draft.documentType || 'INVOICE'}:${draft.documentId || draft.invoiceId}`,
+          draft,
+        ]),
+    );
+    const search = String(q.search || '')
+      .trim()
+      .toLowerCase();
+    const now = Date.now();
+    const invoiceData = invoices
+      .map((invoice) => {
+        const customer = customerMap.get(String(invoice.customerId));
+        const tracking = draftByDocument.get(`INVOICE:${String(invoice._id)}`);
+        const matching = (customer?.interactions || [])
+          .filter((item: any) =>
+            item.invoiceId
+              ? String(item.invoiceId) === String(invoice._id)
+              : item.invoiceCode === invoice.code,
+          )
+          .sort(
+            (left: any, right: any) =>
+              new Date(right.occurredAt || right.at || 0).getTime() -
+              new Date(left.occurredAt || left.at || 0).getTime(),
+          );
+        const latest = matching[0] || null;
+        const lastUpdatedAt =
+          tracking?.lastUpdatedAt || latest?.occurredAt || latest?.at || null;
+        const followUpAt = lastUpdatedAt
+          ? new Date(new Date(lastUpdatedAt).getTime() + 24 * 60 * 60 * 1000)
+          : null;
+        const needsFollowUp =
+          (tracking?.invoiceStatus || latest?.invoiceStatus) === 'SENT' &&
+          !(tracking?.interaction || latest?.interaction) &&
+          Boolean(followUpAt && followUpAt.getTime() <= now);
+        return {
+          id: String(invoice._id),
+          documentType: 'INVOICE',
+          documentId: String(invoice._id),
+          documentCode: invoice.code,
+          draftId: tracking?._id ? String(tracking._id) : '',
+          customerSelectable: !customer,
+          invoiceId: String(invoice._id),
+          invoiceCode: invoice.code,
+          invoiceDate: invoice.date,
+          amount: invoice.grandTotal ?? invoice.totalAmount ?? 0,
+          customerId:
+            tracking?.customerId || (customer?._id ? String(customer._id) : ''),
+          customerCode: tracking?.customerCode || customer?.code || '',
+          customerName: tracking?.customerName || customer?.name || '',
+          phone:
+            tracking?.phone ||
+            latest?.phone ||
+            customer?.phone ||
+            customer?.phones?.[0] ||
+            invoice.customerPhone ||
+            '',
+          salespersonId: String(invoice.salespersonId || ''),
+          salespersonCode: invoice.salespersonCode,
+          salespersonName: invoice.salespersonName,
+          zaloStatus:
+            tracking?.zaloStatus ||
+            latest?.zaloStatus ||
+            (customer?.zaloConnected ? 'CONNECTED' : 'NOT_CONNECTED'),
+          invoiceStatus:
+            tracking?.invoiceStatus || latest?.invoiceStatus || 'NOT_SENT',
+          interactionChannel: normalizeInteractionChannel(
+            tracking?.interactionChannel || latest?.channel,
+          ),
+          interaction: tracking?.interaction || latest?.interaction || '',
+          note: tracking?.note || latest?.note || '',
+          lastUpdatedAt,
+          followUpAt,
+          needsFollowUp,
+          historyCount: matching.length,
+        };
+      })
+      .filter(Boolean);
+    const mapOperationalDocuments = (documents: any[], documentType: string) =>
+      documents.map((document) => {
+        const customer = customerMap.get(String(document.customerId));
+        const id = String(document._id);
+        const tracking = draftByDocument.get(`${documentType}:${id}`);
+        const matching = (customer?.interactions || [])
+          .filter(
+            (item: any) =>
+              item.documentType === documentType &&
+              (String(item.documentId || '') === id ||
+                item.documentCode === document.code),
+          )
+          .sort(
+            (left: any, right: any) =>
+              new Date(right.occurredAt || right.at || 0).getTime() -
+              new Date(left.occurredAt || left.at || 0).getTime(),
+          );
+        const latest = matching[0] || null;
+        const lastUpdatedAt =
+          tracking?.lastUpdatedAt || latest?.occurredAt || latest?.at || null;
+        const followUpAt = lastUpdatedAt
+          ? new Date(new Date(lastUpdatedAt).getTime() + 24 * 60 * 60 * 1000)
+          : null;
+        const invoiceStatus =
+          tracking?.invoiceStatus || latest?.invoiceStatus || 'NOT_SENT';
+        const interaction = tracking?.interaction || latest?.interaction || '';
+        return {
+          id,
+          documentType,
+          documentId: id,
+          documentCode: document.code,
+          draftId: tracking?._id ? String(tracking._id) : '',
+          customerSelectable: !customer,
+          invoiceId: '',
+          invoiceCode: document.code,
+          invoiceDate: document.date || document.createdAt,
+          amount:
+            documentType === 'DEBT_PAYMENT'
+              ? Number(document.amount || 0)
+              : Number(document.returnAmount || 0),
+          customerId:
+            tracking?.customerId || (customer?._id ? String(customer._id) : ''),
+          customerCode:
+            tracking?.customerCode ||
+            customer?.code ||
+            document.customerCode ||
+            '',
+          customerName:
+            tracking?.customerName ||
+            customer?.name ||
+            document.customerName ||
+            '',
+          phone:
+            tracking?.phone ||
+            latest?.phone ||
+            customer?.phone ||
+            customer?.phones?.[0] ||
+            document.customerPhone ||
+            '',
+          salespersonId: String(
+            document.collectorId || document.createdBy || '',
+          ),
+          salespersonCode: document.collectorCode || '',
+          salespersonName: document.collectorName || '',
+          zaloStatus:
+            tracking?.zaloStatus ||
+            latest?.zaloStatus ||
+            (customer?.zaloConnected ? 'CONNECTED' : 'NOT_CONNECTED'),
+          invoiceStatus,
+          interactionChannel: normalizeInteractionChannel(
+            tracking?.interactionChannel || latest?.channel,
+          ),
+          interaction,
+          note: tracking?.note || latest?.note || '',
+          lastUpdatedAt,
+          followUpAt,
+          needsFollowUp:
+            invoiceStatus === 'SENT' &&
+            !interaction &&
+            Boolean(followUpAt && followUpAt.getTime() <= now),
+          historyCount: matching.length,
+        };
+      });
+    const debtPaymentData = mapOperationalDocuments(
+      debtPayments,
+      'DEBT_PAYMENT',
+    );
+    const customerReturnData = mapOperationalDocuments(
+      customerReturns,
+      'CUSTOMER_RETURN',
+    );
+    const draftData = drafts
+      .filter((draft) => !draft.documentId && !draft.invoiceId)
+      .map((draft) => {
+        const lastUpdatedAt =
+          draft.lastUpdatedAt || draft.updatedAt || draft.createdAt;
+        const followUpAt = lastUpdatedAt
+          ? new Date(new Date(lastUpdatedAt).getTime() + 24 * 60 * 60 * 1000)
+          : null;
+        return {
+          id: String(draft._id),
+          draftId: String(draft._id),
+          isTemporary: true,
+          customerSelectable: true,
+          invoiceId: '',
+          invoiceCode: draft.invoiceCode || '',
+          invoiceDate: draft.date,
+          amount: 0,
+          customerCode: draft.customerCode || '',
+          customerId: draft.customerId || '',
+          customerName: draft.customerName || '',
+          phone: draft.phone || '',
+          salespersonName: draft.salespersonName || '',
+          zaloStatus: draft.zaloStatus || 'NOT_CONNECTED',
+          invoiceStatus: draft.invoiceStatus || 'NOT_SENT',
+          interactionChannel: normalizeInteractionChannel(
+            draft.interactionChannel,
+          ),
+          interaction: draft.interaction || '',
+          note: draft.note || '',
+          lastUpdatedAt,
+          followUpAt,
+          needsFollowUp:
+            draft.invoiceStatus === 'SENT' &&
+            !draft.interaction &&
+            Boolean(followUpAt && followUpAt.getTime() <= now),
+          historyCount: 0,
+        };
+      });
+    const data = [
+      ...invoiceData,
+      ...debtPaymentData,
+      ...customerReturnData,
+      ...draftData,
+    ].filter((item: any) =>
+      !search
+        ? true
+        : [
+            item.customerCode,
+            item.customerName,
+            item.phone,
+            item.invoiceCode,
+            item.salespersonName,
+          ]
+            .join(' ')
+            .toLowerCase()
+            .includes(search),
+    );
+    return {
+      data,
+      book: book
+        ? {
+            isFinalized: Boolean(book.isFinalized),
+            finalizedAt: book.finalizedAt,
+            finalizedBy: book.finalizedBy,
+          }
+        : { isFinalized: false },
+      summary: {
+        total: data.length,
+        sourceInvoiceCount: invoiceData.length,
+        debtPaymentCount: debtPaymentData.length,
+        customerReturnCount: customerReturnData.length,
+        sourceDocumentCount:
+          invoiceData.length +
+          debtPaymentData.length +
+          customerReturnData.length,
+        trackedInvoiceCount: data.filter(
+          (item: any) => item.documentId || item.invoiceId,
+        ).length,
+        manualCount: draftData.length,
+        sent: data.filter((item: any) => item.invoiceStatus === 'SENT').length,
+        notSent: data.filter((item: any) => item.invoiceStatus !== 'SENT')
+          .length,
+        needsFollowUp: data.filter((item: any) => item.needsFollowUp).length,
+      },
+    };
+  }
+
+  async createInvoiceFollowUpDraft(
+    dto: CreateInvoiceFollowUpDraftDto,
+    actorId: string,
+  ) {
+    const date = vietnamDateBoundary(dto.date, false);
+    const closed = await this.invoiceFollowUpBookModel.exists({
+      date,
+      isFinalized: true,
+    });
+    if (closed)
+      throw new BadRequestException('Sổ theo dõi ngày này đã được chốt');
+    const now = new Date();
+    const values = {
+      ...dto,
+      documentType: dto.documentType || (dto.invoiceId ? 'INVOICE' : undefined),
+      documentId: dto.documentId || dto.invoiceId,
+      documentCode: dto.documentCode || dto.invoiceCode,
+      date,
+      customerName: dto.customerName?.trim() || '',
+      customerCode: dto.customerCode?.trim(),
+      invoiceCode: dto.invoiceCode?.trim(),
+      phone: dto.phone?.trim(),
+      note: dto.note?.trim(),
+      interaction: dto.interaction?.trim(),
+      updatedBy: actorId,
+      lastUpdatedAt: now,
+    };
+    const documentType = dto.documentType || (dto.invoiceId ? 'INVOICE' : '');
+    const documentId = dto.documentId || dto.invoiceId;
+    if (documentType && documentId) {
+      const dateFilter = {
+        $gte: vietnamDateBoundary(dto.date, false),
+        $lte: vietnamDateBoundary(dto.date, true),
+      };
+      const document =
+        documentType === 'DEBT_PAYMENT'
+          ? await this.debtPaymentModel.exists({
+              _id: documentId,
+              isDeleted: false,
+              status: 'ACTIVE',
+              date: dateFilter,
+            })
+          : documentType === 'CUSTOMER_RETURN'
+            ? await this.customerReturnModel.exists({
+                _id: documentId,
+                isDeleted: false,
+                status: 'COMPLETED',
+                createdAt: dateFilter,
+              })
+            : await this.invoiceModel.exists({
+                _id: documentId,
+                isDeleted: false,
+                status: { $ne: 'REVERSED' },
+                date: dateFilter,
+              });
+      if (!document)
+        throw new BadRequestException(
+          'Chứng từ liên kết không tồn tại trong ngày đã chọn',
+        );
+      const draft = await this.invoiceFollowUpDraftModel.findOneAndUpdate(
+        { documentType, documentId, isDeleted: false },
+        { $set: values, $setOnInsert: { createdBy: actorId } },
+        { new: true, upsert: true },
+      );
+      return { data: draft };
+    }
+    const draft = await this.invoiceFollowUpDraftModel.create({
+      ...values,
+      createdBy: actorId,
+    });
+    return { data: draft };
+  }
+
+  async updateInvoiceFollowUpDraft(
+    id: string,
+    dto: UpdateInvoiceFollowUpDraftDto,
+    actorId: string,
+  ) {
+    const existing: any = await this.invoiceFollowUpDraftModel
+      .findOne({ _id: id, isDeleted: false })
+      .lean();
+    if (!existing) throw new NotFoundException('Không tìm thấy dòng theo dõi');
+    const bookDate = dto.date
+      ? vietnamDateBoundary(dto.date, false)
+      : new Date(existing.date);
+    const closed = await this.invoiceFollowUpBookModel.exists({
+      date: bookDate,
+      isFinalized: true,
+    });
+    if (closed)
+      throw new BadRequestException('Sổ theo dõi ngày này đã được chốt');
+    const changes: any = {
+      ...dto,
+      updatedBy: actorId,
+      lastUpdatedAt: new Date(),
+    };
+    if (dto.date) changes.date = vietnamDateBoundary(dto.date, false);
+    for (const key of [
+      'customerName',
+      'customerCode',
+      'invoiceCode',
+      'phone',
+      'note',
+      'interaction',
+    ])
+      if (changes[key] !== undefined)
+        changes[key] = String(changes[key]).trim();
+    const draft = await this.invoiceFollowUpDraftModel.findOneAndUpdate(
+      { _id: id, isDeleted: false },
+      { $set: changes },
+      { new: true },
+    );
+    if (!draft) throw new NotFoundException('Không tìm thấy dòng tạm');
+    return { data: draft };
+  }
+
+  async removeInvoiceFollowUpDraft(id: string, actorId: string) {
+    const existing: any = await this.invoiceFollowUpDraftModel
+      .findOne({ _id: id, isDeleted: false })
+      .lean();
+    if (!existing) throw new NotFoundException('Không tìm thấy dòng tạm');
+    const closed = await this.invoiceFollowUpBookModel.exists({
+      date: existing.date,
+      isFinalized: true,
+    });
+    if (closed)
+      throw new BadRequestException('Sổ theo dõi ngày này đã được chốt');
+    const draft = await this.invoiceFollowUpDraftModel.findOneAndUpdate(
+      { _id: id, isDeleted: false },
+      { $set: { isDeleted: true, deletedAt: new Date(), deletedBy: actorId } },
+      { new: true },
+    );
+    if (!draft) throw new NotFoundException('Không tìm thấy dòng tạm');
+    return { data: { id, deleted: true } };
+  }
+
+  async finalizeDailyInvoiceFollowUps(
+    q: DailyInvoiceFollowUpQueryDto,
+    actorId: string,
+  ) {
+    const date = vietnamDateBoundary(q.date, false);
+    const existing: any = await this.invoiceFollowUpBookModel
+      .findOne({ date })
+      .lean();
+    if (existing?.isFinalized)
+      return {
+        data: {
+          alreadyFinalized: true,
+          finalizedAt: existing.finalizedAt,
+          interactionCount: existing.interactionCount || 0,
+        },
+      };
+    const result: any = await this.dailyInvoiceFollowUps(q);
+    const rows = result.data.filter((row: any) => row.customerId);
+    if (rows.length) {
+      await this.model.bulkWrite(
+        rows.map((row: any) => ({
+          updateOne: {
+            filter: { _id: row.customerId, isDeleted: false },
+            update: {
+              $push: {
+                interactions: {
+                  at: new Date(),
+                  occurredAt: new Date(),
+                  channel: normalizeInteractionChannel(
+                    row.interactionChannel,
+                  ),
+                  action: 'Chốt sổ theo dõi gửi hóa đơn điện tử',
+                  zaloStatus: row.zaloStatus,
+                  invoiceStatus: row.invoiceStatus,
+                  interaction: row.interaction || undefined,
+                  phone: row.phone || undefined,
+                  note: row.note || undefined,
+                  invoiceId: row.invoiceId || undefined,
+                  invoiceCode: row.invoiceCode || undefined,
+                  documentType: row.documentType || undefined,
+                  documentId: row.documentId || undefined,
+                  documentCode:
+                    row.documentCode || row.invoiceCode || undefined,
+                  createdBy: actorId,
+                },
+              },
+              ...(row.zaloStatus
+                ? { $set: { zaloConnected: row.zaloStatus === 'CONNECTED' } }
+                : {}),
+            },
+          },
+        })),
+      );
+    }
+    const finalizedAt = new Date();
+    const book = await this.invoiceFollowUpBookModel.findOneAndUpdate(
+      { date },
+      {
+        $set: {
+          isFinalized: true,
+          finalizedAt,
+          finalizedBy: actorId,
+          sourceInvoiceCount: result.summary.sourceDocumentCount,
+          trackedInvoiceCount: result.summary.trackedInvoiceCount,
+          interactionCount: rows.length,
+        },
+      },
+      { new: true, upsert: true },
+    );
+    return { data: book };
+  }
+
+  async exportDailyInvoiceFollowUps(q: DailyInvoiceFollowUpQueryDto) {
+    const result: any = await this.dailyInvoiceFollowUps(q);
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Theo dõi hóa đơn');
+    sheet.columns = [
+      { header: 'MÃ KHÁCH HÀNG', key: 'customerCode', width: 18 },
+      { header: 'TÊN KHÁCH HÀNG', key: 'customerName', width: 34 },
+      { header: 'LOẠI CHỨNG TỪ', key: 'documentTypeLabel', width: 22 },
+      { header: 'KB ZALO', key: 'zaloStatus', width: 18 },
+      { header: 'HÓA ĐƠN', key: 'invoiceStatus', width: 16 },
+      { header: 'MÃ HÓA ĐƠN', key: 'invoiceCode', width: 20 },
+      { header: 'LOẠI TƯƠNG TÁC', key: 'interactionChannelLabel', width: 20 },
+      { header: 'TƯƠNG TÁC', key: 'interaction', width: 24 },
+      { header: 'SỐ ĐIỆN THOẠI', key: 'phone', width: 18 },
+      { header: 'NOTE', key: 'note', width: 35 },
+      { header: 'SALE', key: 'salespersonName', width: 24 },
+      { header: 'NGÀY', key: 'invoiceDate', width: 18 },
+      { header: 'CẦN CẬP NHẬT 24H', key: 'needsFollowUp', width: 20 },
+    ];
+    result.data.forEach((item: any) =>
+      sheet.addRow({
+        ...item,
+        documentTypeLabel:
+          item.documentType === 'DEBT_PAYMENT'
+            ? 'THANH TOÁN CÔNG NỢ'
+            : item.documentType === 'CUSTOMER_RETURN'
+              ? 'HOÀN HÀNG TỪ KHÁCH'
+              : item.documentType === 'INVOICE'
+                ? 'HÓA ĐƠN BÁN HÀNG'
+                : 'DÒNG TẠM',
+        zaloStatus:
+          item.zaloStatus === 'CONNECTED' ? 'ĐÃ KẾT BẠN' : 'CHƯA KẾT BẠN',
+        invoiceStatus: item.invoiceStatus === 'SENT' ? 'ĐÃ GỬI' : 'CHƯA GỬI',
+        interactionChannelLabel:
+          normalizeInteractionChannel(item.interactionChannel) === 'PHONE'
+            ? 'GỌI ĐIỆN'
+            : normalizeInteractionChannel(item.interactionChannel) === 'SMS'
+              ? 'SMS'
+              : 'ZALO',
+        needsFollowUp: item.needsFollowUp ? 'CẦN CẬP NHẬT' : '',
+      }),
+    );
+    sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    sheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF315F50' },
+    };
+    sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    sheet.autoFilter = { from: 'A1', to: 'L1' };
+    return Buffer.from(await workbook.xlsx.writeBuffer());
   }
 
   async updateStoreProfile(
@@ -940,10 +1582,7 @@ export class CustomersService implements OnModuleInit {
           !row.note?.trim()
         )
           throw new Error('Dòng chưa có nội dung hoặc trạng thái tương tác');
-        const occurredAt = parseBusinessDate(
-          row.occurredAt,
-          'Ngày tương tác',
-        );
+        const occurredAt = parseBusinessDate(row.occurredAt, 'Ngày tương tác');
         const phone = normalizePhones(row.phone).join(', ');
         const importKey = buildCustomerInteractionImportKey(
           row,
