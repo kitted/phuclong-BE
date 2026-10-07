@@ -520,7 +520,7 @@ export class CustomersService implements OnModuleInit {
       this.model
         .find(filter)
         .select(
-          'code codeStatus name phone phones email address source segment zaloConnected debt debtLimit note createdAt updatedAt storeLocation.latitude storeLocation.longitude storefrontImage.url',
+          'code codeStatus name phone phones email address source segment zaloConnected debt debtLimit invoiceCoinBalance plusExCoinBalance note createdAt updatedAt storeLocation.latitude storeLocation.longitude storefrontImage.url',
         )
         .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)

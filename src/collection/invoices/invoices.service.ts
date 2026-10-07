@@ -543,7 +543,11 @@ export class InvoicesService {
         voucher = await this.voucherModel
           .findOne({
             code: normalizedCode,
-            customerId: dto.customerId,
+            $or: [
+              { customerId: dto.customerId },
+              { customerId: null },
+              { customerId: { $exists: false } },
+            ],
             status: VoucherStatus.ACTIVE,
             isDeleted: false,
           })
@@ -568,23 +572,110 @@ export class InvoicesService {
           throw new ConflictException(
             'Chương trình hoặc voucher không còn hiệu lực',
           );
+        if (
+          !promotion.allowStacking &&
+          ((dto as CreateInvoiceDto).promotionApplications?.length ||
+            (dto as CreateInvoiceDto).gifts?.length)
+        )
+          throw new ConflictException(
+            'Voucher này không được áp dụng đồng thời với khuyến mãi hoặc quà tặng khác',
+          );
+        const customer: any = await this.customerModel
+          .findOne({ _id: dto.customerId, isDeleted: false })
+          .select('segment')
+          .session(session || null)
+          .lean();
+        if (!customer)
+          throw new ConflictException(
+            'Không tìm thấy khách hàng áp dụng voucher',
+          );
+        if (
+          promotion.eligibleCustomerSegments?.length &&
+          !promotion.eligibleCustomerSegments.includes(customer.segment)
+        )
+          throw new ConflictException(
+            'Voucher không áp dụng cho phân hạng hiện tại của khách hàng',
+          );
+        if (Number(promotion.inactiveMonths || 0) > 0) {
+          const inactiveSince = new Date();
+          inactiveSince.setMonth(
+            inactiveSince.getMonth() - Number(promotion.inactiveMonths),
+          );
+          const recentInvoice = await this.model.exists({
+            customerId: dto.customerId,
+            isDeleted: false,
+            status: { $ne: InvoiceStatus.REVERSED },
+            date: { $gte: inactiveSince },
+          });
+          if (recentInvoice)
+            throw new ConflictException(
+              `Voucher chỉ dành cho khách chưa mua hàng trong ${promotion.inactiveMonths} tháng`,
+            );
+        }
+        const localNow = new Date(
+          now.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }),
+        );
+        if (
+          promotion.allowedWeekdays?.length &&
+          !promotion.allowedWeekdays.includes(localNow.getDay())
+        )
+          throw new ConflictException(
+            'Voucher không áp dụng trong ngày hôm nay',
+          );
+        const localTime = `${String(localNow.getHours()).padStart(2, '0')}:${String(localNow.getMinutes()).padStart(2, '0')}`;
+        if (
+          (promotion.dailyStartTime && localTime < promotion.dailyStartTime) ||
+          (promotion.dailyEndTime && localTime > promotion.dailyEndTime)
+        )
+          throw new ConflictException('Voucher nằm ngoài khung giờ áp dụng');
+        if (
+          Number(promotion.budgetLimit || 0) > 0 &&
+          Number(promotion.budgetUsed || 0) >= Number(promotion.budgetLimit)
+        )
+          throw new ConflictException('Ngân sách voucher đã được sử dụng hết');
+        if (
+          Number(voucher.maxUses || 0) > 0 &&
+          Number(voucher.usageCount || 0) >= Number(voucher.maxUses)
+        )
+          throw new ConflictException('Voucher đã đạt giới hạn số lần sử dụng');
+        const customerUsage = await this.model.countDocuments({
+          voucherId: voucher._id,
+          customerId: dto.customerId,
+          isDeleted: false,
+          status: { $ne: InvoiceStatus.REVERSED },
+        });
+        if (
+          Number(promotion.usageLimitPerCustomer || 0) > 0 &&
+          customerUsage >= Number(promotion.usageLimitPerCustomer)
+        )
+          throw new ConflictException(
+            'Khách hàng đã đạt giới hạn sử dụng voucher',
+          );
         if (subtotal < promotion.minOrderValue)
           throw new ConflictException(
             'Hóa đơn chưa đạt giá trị tối thiểu của chương trình',
           );
         const categoryIds = new Set((promotion.categoryIds || []).map(String));
         const productIds = new Set((promotion.productIds || []).map(String));
+        const excludedCategoryIds = new Set(
+          (promotion.excludedCategoryIds || []).map(String),
+        );
+        const excludedProductIds = new Set(
+          (promotion.excludedProductIds || []).map(String),
+        );
         const eligible = items.filter(
           (item) =>
-            promotion.scope === PromotionScope.ALL ||
-            (promotion.scope === PromotionScope.CATEGORY &&
-              item.categoryId &&
-              categoryIds.has(item.categoryId)) ||
-            (promotion.scope === PromotionScope.PRODUCTS &&
-              productIds.has(item.productId)) ||
-            (promotion.scope === PromotionScope.PRODUCT_TYPE &&
-              String(item.productType).toLocaleLowerCase('vi') ===
-                String(promotion.productType).toLocaleLowerCase('vi')),
+            !excludedProductIds.has(item.productId) &&
+            (!item.categoryId || !excludedCategoryIds.has(item.categoryId)) &&
+            (promotion.scope === PromotionScope.ALL ||
+              (promotion.scope === PromotionScope.CATEGORY &&
+                item.categoryId &&
+                categoryIds.has(item.categoryId)) ||
+              (promotion.scope === PromotionScope.PRODUCTS &&
+                productIds.has(item.productId)) ||
+              (promotion.scope === PromotionScope.PRODUCT_TYPE &&
+                String(item.productType).toLocaleLowerCase('vi') ===
+                  String(promotion.productType).toLocaleLowerCase('vi'))),
         );
         const eligibleAmount = eligible.reduce(
           (sum, item) => sum + item.lineTotal,
@@ -600,6 +691,14 @@ export class InvoicesService {
             : promotion.discountValue;
         if (promotion.maxDiscount > 0)
           discountAmount = Math.min(discountAmount, promotion.maxDiscount);
+        if (
+          Number(promotion.budgetLimit || 0) > 0 &&
+          Number(promotion.budgetUsed || 0) + discountAmount >
+            Number(promotion.budgetLimit)
+        )
+          throw new ConflictException(
+            'Số tiền giảm vượt quá ngân sách còn lại của voucher',
+          );
         discountAmount = Math.min(Math.round(discountAmount), eligibleAmount);
         let allocated = 0;
         eligibleItems = eligible.map((item, index) => {
@@ -1311,25 +1410,69 @@ export class InvoicesService {
             { session },
           );
         if (calculated.voucher) {
-          const claimed = await this.voucherModel.findOneAndUpdate(
-            { _id: calculated.voucher._id, status: VoucherStatus.ACTIVE },
+          const promotionClaim = await this.promotionModel.updateOne(
             {
-              status: VoucherStatus.USED,
-              usedAt: new Date(),
-              orderReference: code,
-              invoiceId: String(invoice._id),
+              _id: calculated.promotion._id,
+              ...(Number(calculated.promotion.budgetLimit || 0) > 0
+                ? {
+                    budgetUsed: {
+                      $lte:
+                        Number(calculated.promotion.budgetLimit) -
+                        calculated.discountAmount,
+                    },
+                  }
+                : {}),
             },
+            {
+              $inc: {
+                used: 1,
+                budgetUsed: calculated.discountAmount,
+              },
+            },
+            { session },
+          );
+          if (!promotionClaim.modifiedCount)
+            throw new ConflictException(
+              'Ngân sách voucher vừa được giao dịch khác sử dụng hết',
+            );
+          const maxUses = Number(calculated.voucher.maxUses || 0);
+          const claimed = await this.voucherModel.findOneAndUpdate(
+            {
+              _id: calculated.voucher._id,
+              status: VoucherStatus.ACTIVE,
+              ...(maxUses > 0 ? { usageCount: { $lt: maxUses } } : {}),
+            },
+            [
+              {
+                $set: {
+                  usageCount: { $add: [{ $ifNull: ['$usageCount', 0] }, 1] },
+                  usedAt: new Date(),
+                  orderReference: code,
+                  invoiceId: String(invoice._id),
+                  status:
+                    maxUses > 0
+                      ? {
+                          $cond: [
+                            {
+                              $gte: [
+                                { $add: [{ $ifNull: ['$usageCount', 0] }, 1] },
+                                maxUses,
+                              ],
+                            },
+                            VoucherStatus.USED,
+                            VoucherStatus.ACTIVE,
+                          ],
+                        }
+                      : VoucherStatus.ACTIVE,
+                },
+              },
+            ],
             { new: true, session },
           );
           if (!claimed)
             throw new ConflictException(
               'Voucher đã được sử dụng bởi giao dịch khác',
             );
-          await this.promotionModel.updateOne(
-            { _id: calculated.promotion._id },
-            { $inc: { used: 1 } },
-            { session },
-          );
         }
         if (calculated.manualActivation) {
           const claimed = await this.activationModel.findOneAndUpdate(
@@ -1847,15 +1990,45 @@ export class InvoicesService {
             { session },
           );
         }
-        if (invoice.voucherId)
+        if (invoice.voucherId) {
           await this.voucherModel.updateOne(
-            { _id: invoice.voucherId, invoiceId: String(invoice._id) },
-            {
-              $set: { status: VoucherStatus.ACTIVE },
-              $unset: { usedAt: 1, orderReference: 1, invoiceId: 1 },
-            },
+            { _id: invoice.voucherId, usageCount: { $gt: 0 } },
+            [
+              {
+                $set: {
+                  usageCount: { $subtract: ['$usageCount', 1] },
+                  status: VoucherStatus.ACTIVE,
+                },
+              },
+            ],
             { session },
           );
+          if (invoice.promotionId)
+            await this.promotionModel.updateOne(
+              { _id: invoice.promotionId },
+              [
+                {
+                  $set: {
+                    used: {
+                      $max: [0, { $subtract: [{ $ifNull: ['$used', 0] }, 1] }],
+                    },
+                    budgetUsed: {
+                      $max: [
+                        0,
+                        {
+                          $subtract: [
+                            { $ifNull: ['$budgetUsed', 0] },
+                            Number(invoice.discountAmount || 0),
+                          ],
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+              { session },
+            );
+        }
         await this.activationModel.updateMany(
           { invoiceId: invoice._id, status: PromotionActivationStatus.ACTIVE },
           {
