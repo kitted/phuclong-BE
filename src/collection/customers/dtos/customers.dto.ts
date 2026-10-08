@@ -19,6 +19,9 @@ import {
 import {
   CustomerInvoiceSendStatus,
   CustomerInteractionChannel,
+  CustomerInteractionContext,
+  CustomerCareOutcome,
+  CustomerCarePurpose,
   CustomerSegment,
   CustomerSource,
   CustomerZaloStatus,
@@ -110,6 +113,20 @@ export class CreateInteractionDto {
   @ApiPropertyOptional() @IsOptional() @IsDateString() occurredAt?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() invoiceId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() invoiceCode?: string;
+  @ApiPropertyOptional({ enum: CustomerInteractionContext })
+  @IsOptional()
+  @IsEnum(CustomerInteractionContext)
+  context?: CustomerInteractionContext;
+  @ApiPropertyOptional({ enum: CustomerCarePurpose })
+  @IsOptional()
+  @IsEnum(CustomerCarePurpose)
+  purpose?: CustomerCarePurpose;
+  @ApiPropertyOptional({ enum: CustomerCareOutcome })
+  @IsOptional()
+  @IsEnum(CustomerCareOutcome)
+  outcome?: CustomerCareOutcome;
+  @ApiPropertyOptional() @IsOptional() @IsBoolean() followUpRequired?: boolean;
+  @ApiPropertyOptional() @IsOptional() @IsDateString() nextFollowUpAt?: string;
 }
 
 export class DailyInvoiceFollowUpQueryDto {

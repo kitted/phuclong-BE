@@ -1,5 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsIn, IsMongoId, IsOptional, IsString } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsIn,
+  IsMongoId,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 export enum ReportPeriodType {
   WEEK = 'WEEK',
   MONTH = 'MONTH',
@@ -48,4 +55,12 @@ export class DashboardPeriodQueryDto {
   purchaseStatus?: 'ALL' | 'PURCHASED' | 'NOT_PURCHASED';
   @ApiPropertyOptional() @IsOptional() @IsString() search?: string;
   @ApiPropertyOptional() @IsOptional() page?: string;
+}
+
+export class NewCustomerCareExportDto extends DashboardPeriodQueryDto {
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsMongoId({ each: true })
+  customerIds?: string[];
 }

@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { ReturnModelType } from '@typegoose/typegoose';
 import { getConnectionToken, InjectModel } from 'nestjs-typegoose';
-import { Connection } from 'mongoose';
+import { Connection, Types } from 'mongoose';
 import {
   CustomerCodeStatus,
   CustomerCounters,
@@ -839,7 +839,14 @@ export class CustomersService implements OnModuleInit {
       .findOne({ _id: id, isDeleted: false })
       .lean();
     if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
-    const [invoices, vouchers] = await Promise.all([
+    const interactionActorIds = [
+      ...new Set(
+        (customer.interactions || [])
+          .map((interaction: any) => String(interaction.createdBy || ''))
+          .filter((value: string) => Types.ObjectId.isValid(value)),
+      ),
+    ];
+    const [invoices, vouchers, interactionActors] = await Promise.all([
       this.invoiceModel
         .find({ customerId: id, isDeleted: false })
         .sort({ date: -1, createdAt: -1, _id: -1 })
@@ -849,7 +856,14 @@ export class CustomersService implements OnModuleInit {
         .populate('promotionId', 'name discountType discountValue')
         .sort({ createdAt: -1, _id: -1 })
         .lean(),
+      this.userModel
+        .find({ _id: { $in: interactionActorIds } })
+        .select('fullName username employeeCode')
+        .lean(),
     ]);
+    const interactionActorMap = new Map(
+      interactionActors.map((actor: any) => [String(actor._id), actor]),
+    );
     const totalSpent = invoices.reduce(
       (sum, item) => sum + (item.totalAmount || 0),
       0,
@@ -885,7 +899,20 @@ export class CustomersService implements OnModuleInit {
         interactions: (customer.interactions || [])
           .slice()
           .reverse()
-          .map((x) => ({ ...x, id: String(x._id) })),
+          .map((x) => {
+            const actor: any = interactionActorMap.get(String(x.createdBy));
+            return {
+              ...x,
+              id: String(x._id),
+              actor: actor
+                ? {
+                    id: String(actor._id),
+                    name: actor.fullName || actor.username,
+                    code: actor.employeeCode,
+                  }
+                : undefined,
+            };
+          }),
       },
     };
   }
@@ -896,9 +923,17 @@ export class CustomersService implements OnModuleInit {
     actorId?: string,
   ) {
     const occurredAt = dto.occurredAt ? new Date(dto.occurredAt) : new Date();
+    if (dto.followUpRequired && !dto.nextFollowUpAt)
+      throw new BadRequestException(
+        'Vui lòng chọn thời gian cần liên hệ lại khách hàng',
+      );
+    const nextFollowUpAt = dto.nextFollowUpAt
+      ? new Date(dto.nextFollowUpAt)
+      : undefined;
     const interaction = {
       ...dto,
       occurredAt,
+      nextFollowUpAt,
       at: new Date(),
       createdBy: actorId,
     };

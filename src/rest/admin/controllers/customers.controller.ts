@@ -421,7 +421,6 @@ export class CustomersController {
   }
 
   @Post(':id/interactions')
-  @AdminOnly()
   @ApiOperation({ summary: 'Record customer interaction' })
   interaction(
     @Param('id', ParseIdPipe) id: ID,

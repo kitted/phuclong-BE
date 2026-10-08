@@ -30,6 +30,25 @@ export enum CustomerInteractionChannel {
   PHONE = 'PHONE',
   SMS = 'SMS',
 }
+export enum CustomerInteractionContext {
+  NEW_CUSTOMER_CARE = 'NEW_CUSTOMER_CARE',
+}
+export enum CustomerCarePurpose {
+  WELCOME = 'WELCOME',
+  AFTER_SALE = 'AFTER_SALE',
+  NEEDS = 'NEEDS',
+  COMPLAINT = 'COMPLAINT',
+  OTHER = 'OTHER',
+}
+export enum CustomerCareOutcome {
+  POSITIVE = 'POSITIVE',
+  NEUTRAL = 'NEUTRAL',
+  NEEDS_SUPPORT = 'NEEDS_SUPPORT',
+  CALL_BACK = 'CALL_BACK',
+  NO_ANSWER = 'NO_ANSWER',
+  WRONG_NUMBER = 'WRONG_NUMBER',
+  NOT_INTERESTED = 'NOT_INTERESTED',
+}
 export enum StoreLocationSource {
   GPS = 'GPS',
   MAP = 'MAP',
@@ -96,6 +115,12 @@ export class CustomerInteraction {
   @prop() documentType?: string;
   @prop() documentId?: string;
   @prop() documentCode?: string;
+  @prop({ enum: CustomerInteractionContext })
+  context?: CustomerInteractionContext;
+  @prop({ enum: CustomerCarePurpose }) purpose?: CustomerCarePurpose;
+  @prop({ enum: CustomerCareOutcome }) outcome?: CustomerCareOutcome;
+  @prop({ default: false }) followUpRequired?: boolean;
+  @prop() nextFollowUpAt?: Date;
 }
 
 @index({ phone: 1 })

@@ -40,12 +40,14 @@ import {
 } from '../audit-logs/schemas/audit-logs.schema';
 import {
   DashboardPeriodQueryDto,
+  NewCustomerCareExportDto,
   ReportGranularity,
 } from './dtos/dashboard.dto';
 import { resolveReportPeriod } from './report-period';
 import { RoleEnum } from '../users/interfaces/role.enum';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 import { Types } from 'mongoose';
+import * as ExcelJS from 'exceljs';
 export type DashboardActor = { id?: string; role?: RoleEnum };
 @Injectable()
 export class DashboardService {
@@ -583,11 +585,54 @@ export class DashboardService {
     const limit = Math.min(500, Math.max(1, Number(query.limit) || 200));
     const to = new Date();
     const from = new Date(to.getTime() - days * 86400000);
+    const customerDocs: any[] = await this.customers
+      .find({
+        isDeleted: false,
+        code: { $type: 'string', $ne: '' },
+        $or: [
+          { createdAt: { $gte: from, $lte: to } },
+          { 'codeHistory.changedAt': { $gte: from, $lte: to } },
+        ],
+      })
+      .select(
+        'code name phone phones address source segment createdAt codeHistory interactions',
+      )
+      .lean();
+    const qualifiedCustomers = customerDocs.map((customer: any) => {
+      const codeEvents = (customer.codeHistory || [])
+        .filter((entry: any) => {
+          const changedAt = new Date(entry.changedAt);
+          return changedAt >= from && changedAt <= to;
+        })
+        .sort(
+          (left: any, right: any) =>
+            new Date(right.changedAt).getTime() -
+            new Date(left.changedAt).getTime(),
+        );
+      const createdAt = new Date(customer.createdAt);
+      const createdInPeriod = createdAt >= from && createdAt <= to;
+      const latestCodeEvent = codeEvents[0];
+      const codeChangedAt = latestCodeEvent
+        ? new Date(latestCodeEvent.changedAt)
+        : null;
+      const qualifiedAt =
+        codeChangedAt && (!createdInPeriod || codeChangedAt > createdAt)
+          ? codeChangedAt
+          : createdAt;
+      const qualificationReason =
+        qualifiedAt === codeChangedAt
+          ? latestCodeEvent?.oldCode
+            ? 'CODE_CHANGED'
+            : 'CODE_ASSIGNED'
+          : 'CREATED';
+      return { customer, qualifiedAt, qualificationReason };
+    });
+    const customerIds = qualifiedCustomers.map((item) => item.customer._id);
     const match: any = {
       isDeleted: false,
       status: { $ne: 'REVERSED' },
       date: { $gte: from, $lte: to },
-      customerId: { $ne: null },
+      customerId: { $in: customerIds },
     };
     const salespersonId = this.scope(query, actor);
     if (salespersonId && Types.ObjectId.isValid(salespersonId))
@@ -596,79 +641,105 @@ export class DashboardService {
       query.invoiceCount === '1' || query.invoiceCount === '2'
         ? Number(query.invoiceCount)
         : undefined;
-    const grouped: any[] = await this.invoices.aggregate([
-      { $match: match },
-      { $sort: { date: -1, createdAt: -1 } },
-      {
-        $group: {
-          _id: '$customerId',
-          invoiceCount: { $sum: 1 },
-          totalRevenue: {
-            $sum: {
-              $ifNull: ['$grandTotal', { $ifNull: ['$totalAmount', 0] }],
-            },
-          },
-          firstInvoiceAt: { $min: '$date' },
-          latestInvoiceAt: { $max: '$date' },
-          latestInvoiceCode: { $first: '$code' },
-          customerCodeSnapshot: { $first: '$customerCode' },
-          customerNameSnapshot: { $first: '$customerName' },
-          customerPhoneSnapshot: { $first: '$customerPhone' },
-          salespersonNames: { $addToSet: '$salespersonName' },
-        },
-      },
-      {
-        $match: count
-          ? { invoiceCount: count }
-          : { invoiceCount: { $gte: 1, $lte: 2 } },
-      },
-      { $sort: { latestInvoiceAt: -1 } },
-      { $limit: limit },
-    ]);
-    const customerIds = grouped
-      .map((item) => item._id)
-      .filter((id) => Types.ObjectId.isValid(String(id)));
-    const customerDocs: any[] = await this.customers
-      .find({ _id: { $in: customerIds }, isDeleted: false })
-      .select('code name phone phones address source segment createdAt')
+    const invoices: any[] = await this.invoices
+      .find(match)
+      .select(
+        'code date createdAt customerId customerCode customerName customerPhone grandTotal totalAmount salespersonName',
+      )
+      .sort({ date: -1, createdAt: -1 })
       .lean();
-    const customerMap = new Map(
-      customerDocs.map((customer) => [String(customer._id), customer]),
-    );
+    const invoicesByCustomer = new Map<string, any[]>();
+    invoices.forEach((invoice: any) => {
+      const key = String(invoice.customerId || '');
+      invoicesByCustomer.set(key, [
+        ...(invoicesByCustomer.get(key) || []),
+        invoice,
+      ]);
+    });
     const keyword = String(query.search || '')
       .trim()
       .toLocaleLowerCase('vi');
-    const data = grouped
-      .map((item) => {
-        const customer: any = customerMap.get(String(item._id)) || {};
+    const data = qualifiedCustomers
+      .map(({ customer, qualifiedAt, qualificationReason }) => {
+        const customerInvoices = (
+          invoicesByCustomer.get(String(customer._id)) || []
+        ).filter((invoice: any) => new Date(invoice.date) >= qualifiedAt);
+        const invoiceCount = customerInvoices.length;
+        if (
+          count ? invoiceCount !== count : invoiceCount < 1 || invoiceCount > 2
+        )
+          return null;
+        const latest = customerInvoices[0];
+        const first = customerInvoices[customerInvoices.length - 1];
+        const careInteractions = (customer.interactions || [])
+          .filter(
+            (interaction: any) => interaction.context === 'NEW_CUSTOMER_CARE',
+          )
+          .sort(
+            (left: any, right: any) =>
+              new Date(right.occurredAt || right.at).getTime() -
+              new Date(left.occurredAt || left.at).getTime(),
+          );
+        const latestCareInteraction = careInteractions[0];
         return {
-          id: String(item._id),
-          customerCode: customer.code || item.customerCodeSnapshot,
-          customerName:
-            customer.name || item.customerNameSnapshot || 'Khách hàng',
+          id: String(customer._id),
+          customerCode: customer.code || latest?.customerCode,
+          customerName: customer.name || latest?.customerName || 'Khách hàng',
           phone:
-            customer.phone ||
-            customer.phones?.[0] ||
-            item.customerPhoneSnapshot,
+            customer.phone || customer.phones?.[0] || latest?.customerPhone,
           address: customer.address,
           source: customer.source,
           segment: customer.segment,
           customerCreatedAt: customer.createdAt,
-          invoiceCount: item.invoiceCount,
-          totalRevenue: Number(item.totalRevenue || 0),
-          firstInvoiceAt: item.firstInvoiceAt,
-          latestInvoiceAt: item.latestInvoiceAt,
-          latestInvoiceCode: item.latestInvoiceCode,
-          salespersonNames: (item.salespersonNames || []).filter(Boolean),
+          customerQualifiedAt: qualifiedAt,
+          qualificationReason,
+          invoiceCount,
+          totalRevenue: customerInvoices.reduce(
+            (sum, invoice) =>
+              sum + Number(invoice.grandTotal ?? invoice.totalAmount ?? 0),
+            0,
+          ),
+          firstInvoiceAt: first?.date,
+          latestInvoiceAt: latest?.date,
+          latestInvoiceCode: latest?.code,
+          salespersonNames: [
+            ...new Set(
+              customerInvoices
+                .map((invoice) => invoice.salespersonName)
+                .filter(Boolean),
+            ),
+          ],
+          careInteractionCount: careInteractions.length,
+          latestCareInteraction: latestCareInteraction
+            ? {
+                occurredAt:
+                  latestCareInteraction.occurredAt || latestCareInteraction.at,
+                purpose: latestCareInteraction.purpose,
+                outcome: latestCareInteraction.outcome,
+                action: latestCareInteraction.action,
+                result: latestCareInteraction.result,
+                note: latestCareInteraction.note,
+                followUpRequired: latestCareInteraction.followUpRequired,
+                nextFollowUpAt: latestCareInteraction.nextFollowUpAt,
+                createdBy: latestCareInteraction.createdBy,
+              }
+            : null,
         };
       })
+      .filter(Boolean)
       .filter((item) =>
         keyword
           ? `${item.customerCode || ''} ${item.customerName || ''} ${item.phone || ''}`
               .toLocaleLowerCase('vi')
               .includes(keyword)
           : true,
-      );
+      )
+      .sort(
+        (left: any, right: any) =>
+          new Date(right.latestInvoiceAt).getTime() -
+          new Date(left.latestInvoiceAt).getTime(),
+      )
+      .slice(0, limit);
     return {
       data,
       meta: {
@@ -677,8 +748,225 @@ export class DashboardService {
         to,
         invoiceCount: query.invoiceCount || 'ALL',
         total: data.length,
+        candidateCount: qualifiedCustomers.length,
       },
     };
+  }
+
+  async exportNewCustomerCare(
+    query: NewCustomerCareExportDto,
+    actor: DashboardActor,
+  ): Promise<Buffer> {
+    const report = await this.newCustomers(
+      { ...query, limit: '500', search: undefined },
+      actor,
+    );
+    const requestedIds = new Set(
+      (query.customerIds || []).filter((value) =>
+        Types.ObjectId.isValid(value),
+      ),
+    );
+    const customers = (report.data || []).filter(
+      (customer: any) => !requestedIds.size || requestedIds.has(customer.id),
+    );
+    const ids = customers.map((customer: any) => customer.id);
+    const customerDocs: any[] = ids.length
+      ? await this.customers
+          .find({ _id: { $in: ids }, isDeleted: false })
+          .select('interactions')
+          .lean()
+      : [];
+    const interactionMap = new Map(
+      customerDocs.map((customer) => [String(customer._id), customer]),
+    );
+    const actorIds = [
+      ...new Set(
+        customerDocs.flatMap((customer) =>
+          (customer.interactions || [])
+            .filter(
+              (interaction: any) => interaction.context === 'NEW_CUSTOMER_CARE',
+            )
+            .map((interaction: any) => String(interaction.createdBy || ''))
+            .filter((value: string) => Types.ObjectId.isValid(value)),
+        ),
+      ),
+    ];
+    const actors: any[] = actorIds.length
+      ? await this.users
+          .find({ _id: { $in: actorIds } })
+          .select('fullName username employeeCode')
+          .lean()
+      : [];
+    const actorMap = new Map(
+      actors.map((user) => [String(user._id), user.fullName || user.username]),
+    );
+    const purposeLabels: Record<string, string> = {
+      WELCOME: 'Chào hỏi & làm quen',
+      AFTER_SALE: 'Hỏi thăm sau mua hàng',
+      NEEDS: 'Tìm hiểu nhu cầu',
+      COMPLAINT: 'Tiếp nhận vấn đề',
+      OTHER: 'Nội dung khác',
+    };
+    const outcomeLabels: Record<string, string> = {
+      POSITIVE: 'Phản hồi tốt',
+      NEUTRAL: 'Đã trao đổi',
+      NEEDS_SUPPORT: 'Cần hỗ trợ',
+      CALL_BACK: 'Hẹn gọi lại',
+      NO_ANSWER: 'Không nghe máy',
+      WRONG_NUMBER: 'Sai số',
+      NOT_INTERESTED: 'Chưa quan tâm',
+    };
+    const qualificationLabels: Record<string, string> = {
+      CREATED: 'Mới thêm vào hệ thống',
+      CODE_ASSIGNED: 'Mới được cấp mã',
+      CODE_CHANGED: 'Được gán/đổi từ mã cũ',
+    };
+    const rows = customers.flatMap((customer: any) => {
+      const interactions = (interactionMap.get(customer.id)?.interactions || [])
+        .filter(
+          (interaction: any) =>
+            interaction.context === 'NEW_CUSTOMER_CARE' &&
+            new Date(interaction.occurredAt || interaction.at) >=
+              new Date(customer.customerQualifiedAt),
+        )
+        .sort(
+          (left: any, right: any) =>
+            new Date(right.occurredAt || right.at).getTime() -
+            new Date(left.occurredAt || left.at).getTime(),
+        );
+      const base = {
+        customerCode: customer.customerCode || '',
+        customerName: customer.customerName || '',
+        phone: customer.phone || '',
+        qualifiedAt: new Date(customer.customerQualifiedAt),
+        qualification:
+          qualificationLabels[customer.qualificationReason] || 'Khách mới',
+        invoiceCount: customer.invoiceCount,
+        revenue: customer.totalRevenue,
+      };
+      if (!interactions.length)
+        return [
+          {
+            ...base,
+            careStatus: 'CHƯA GỌI',
+            occurredAt: null,
+            purpose: '',
+            outcome: '',
+            action: '',
+            note: '',
+            followUp: '',
+            nextFollowUpAt: null,
+            actorName: '',
+          },
+        ];
+      return interactions.map((interaction: any) => ({
+        ...base,
+        careStatus: interaction.followUpRequired
+          ? 'CẦN GỌI LẠI'
+          : 'ĐÃ CHĂM SÓC',
+        occurredAt: new Date(interaction.occurredAt || interaction.at),
+        purpose:
+          purposeLabels[interaction.purpose] || interaction.purpose || '',
+        outcome:
+          outcomeLabels[interaction.outcome] || interaction.outcome || '',
+        action: interaction.action || '',
+        note: interaction.note || interaction.result || '',
+        followUp: interaction.followUpRequired ? 'CÓ' : 'KHÔNG',
+        nextFollowUpAt: interaction.nextFollowUpAt
+          ? new Date(interaction.nextFollowUpAt)
+          : null,
+        actorName: actorMap.get(String(interaction.createdBy)) || '',
+      }));
+    });
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Phúc Long';
+    const sheet = workbook.addWorksheet('CSKH mới 45 ngày', {
+      views: [{ state: 'frozen', ySplit: 4 }],
+    });
+    sheet.mergeCells('A1:Q1');
+    sheet.getCell('A1').value = 'BÁO CÁO TƯƠNG TÁC KHÁCH HÀNG MỚI';
+    sheet.getCell('A1').font = {
+      bold: true,
+      size: 18,
+      color: { argb: 'FFFFFFFF' },
+    };
+    sheet.getCell('A1').alignment = {
+      horizontal: 'center',
+      vertical: 'middle',
+    };
+    sheet.getCell('A1').fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FF173F64' },
+    };
+    sheet.getRow(1).height = 30;
+    sheet.mergeCells('A2:Q2');
+    sheet.getCell('A2').value =
+      `Khách tạo/cấp/đổi mã trong ${report.meta.days} ngày và phát sinh 1–2 đơn · Xuất lúc ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+    sheet.getCell('A2').font = { italic: true, color: { argb: 'FF475569' } };
+    sheet.getCell('A2').alignment = { horizontal: 'center' };
+    const columns = [
+      ['STT', 'index', 7],
+      ['MÃ KH', 'customerCode', 16],
+      ['TÊN KHÁCH HÀNG', 'customerName', 30],
+      ['SỐ ĐIỆN THOẠI', 'phone', 18],
+      ['NGÀY VÀO NHÓM', 'qualifiedAt', 16],
+      ['LÝ DO VÀO NHÓM', 'qualification', 24],
+      ['SỐ ĐƠN', 'invoiceCount', 10],
+      ['DOANH THU', 'revenue', 18],
+      ['TRẠNG THÁI CSKH', 'careStatus', 18],
+      ['THỜI GIAN GỌI', 'occurredAt', 20],
+      ['MỤC ĐÍCH', 'purpose', 24],
+      ['KẾT QUẢ', 'outcome', 20],
+      ['NỘI DUNG TRAO ĐỔI', 'action', 42],
+      ['GHI CHÚ', 'note', 36],
+      ['GỌI LẠI', 'followUp', 12],
+      ['THỜI GIAN GỌI LẠI', 'nextFollowUpAt', 22],
+      ['NGƯỜI THỰC HIỆN', 'actorName', 22],
+    ];
+    const headerRow = sheet.getRow(4);
+    columns.forEach(([header, key, width], index) => {
+      sheet.getColumn(index + 1).key = String(key);
+      sheet.getColumn(index + 1).width = Number(width);
+      headerRow.getCell(index + 1).value = header;
+    });
+    headerRow.height = 28;
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF315F50' },
+      };
+      cell.alignment = {
+        horizontal: 'center',
+        vertical: 'middle',
+        wrapText: true,
+      };
+    });
+    rows.forEach((row: any, index: number) => {
+      const excelRow = sheet.addRow({ ...row, index: index + 1 });
+      excelRow.alignment = { vertical: 'top', wrapText: true };
+      if (row.careStatus === 'CHƯA GỌI')
+        excelRow.getCell('careStatus').fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFFEBEE' },
+        };
+      if (row.careStatus === 'CẦN GỌI LẠI')
+        excelRow.getCell('careStatus').fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFFFF3E0' },
+        };
+    });
+    sheet.autoFilter = { from: 'A4', to: 'Q4' };
+    ['qualifiedAt', 'occurredAt', 'nextFollowUpAt'].forEach((key) => {
+      sheet.getColumn(key).numFmt = 'dd/mm/yyyy hh:mm';
+    });
+    sheet.getColumn('phone').numFmt = '@';
+    sheet.getColumn('revenue').numFmt = '#,##0';
+    return Buffer.from(await workbook.xlsx.writeBuffer());
   }
   async topProducts(
     query: DashboardPeriodQueryDto,

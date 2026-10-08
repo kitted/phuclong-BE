@@ -1,9 +1,21 @@
-import { Get, Query, Req } from '@nestjs/common';
-import { ApiOperation } from '@nestjs/swagger';
+import {
+  Body,
+  Get,
+  Post,
+  Query,
+  Req,
+  Res,
+  StreamableFile,
+} from '@nestjs/common';
+import { ApiOperation, ApiProduces } from '@nestjs/swagger';
 import { WarehouseController } from '../decorators/warehouse';
 import { DashboardService } from 'src/collection/dashboard/dashboard.service';
-import { DashboardPeriodQueryDto } from '../../../collection/dashboard/dtos/dashboard.dto';
+import {
+  DashboardPeriodQueryDto,
+  NewCustomerCareExportDto,
+} from '../../../collection/dashboard/dtos/dashboard.dto';
 import { AuthRequest } from '../../../collection/auth/interfaces/authRequest.interface';
+import { Response } from 'express';
 @WarehouseController(['dashboard'])
 export class DashboardController {
   constructor(private readonly service: DashboardService) {}
@@ -52,6 +64,27 @@ export class DashboardController {
     @Req() request: AuthRequest,
   ) {
     return this.service.newCustomers(query, this.actor(request));
+  }
+  @Post('new-customers/interactions/export')
+  @ApiOperation({ summary: 'Export new-customer care interactions to XLSX' })
+  @ApiProduces(
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+  async exportNewCustomerCare(
+    @Body() query: NewCustomerCareExportDto,
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const file = await this.service.exportNewCustomerCare(
+      query,
+      this.actor(request),
+    );
+    response.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="BAOCAO-TUONGTAC-KHM-${new Date().toISOString().slice(0, 10)}.xlsx"`,
+    });
+    return new StreamableFile(file);
   }
   @Get('top-products') topProducts(
     @Query() query: DashboardPeriodQueryDto,

@@ -43,6 +43,15 @@ describe('Customers phone schema', () => {
     expect(
       schema.path('interactions').schema.path('difficultCustomer'),
     ).toBeDefined();
+    expect(schema.path('interactions').schema.path('context')).toBeDefined();
+    expect(schema.path('interactions').schema.path('purpose')).toBeDefined();
+    expect(schema.path('interactions').schema.path('outcome')).toBeDefined();
+    expect(
+      schema.path('interactions').schema.path('followUpRequired'),
+    ).toBeDefined();
+    expect(
+      schema.path('interactions').schema.path('nextFollowUpAt'),
+    ).toBeDefined();
   });
 
   it('persists the difficult-customer marker on the customer profile', () => {
