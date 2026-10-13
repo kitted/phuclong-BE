@@ -1,5 +1,5 @@
 import { Type, Transform } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsEnum, IsInt, IsMongoId, IsNumber, IsOptional, IsString, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsInt, IsMongoId, IsNumber, IsOptional, IsString, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { RefundMethod, ReturnCondition, UnclassifiedStatus } from '../schemas/customer-returns.schema';
 
@@ -14,6 +14,7 @@ export class RefundDto { @IsEnum(RefundMethod) method: RefundMethod; @IsNumber()
 export class ReturnSettlementDto { @IsNumber() @Min(0) debtReductionAmount: number; @IsArray() @ValidateNested({ each: true }) @Type(() => RefundDto) refunds: RefundDto[]; }
 export class CreateCustomerReturnDto {
   @IsMongoId() customerId: string; @IsMongoId() destinationTruckId: string;
+  @IsOptional() @IsDateString() date?: string;
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => CustomerReturnItemDto) items: CustomerReturnItemDto[];
   @ValidateNested() @Type(() => ReturnSettlementDto) settlement: ReturnSettlementDto;
   @IsOptional() @IsString() reason?: string; @IsOptional() @IsString() priceAdjustmentReason?: string; @IsOptional() @IsString() note?: string;

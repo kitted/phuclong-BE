@@ -54,4 +54,14 @@ describe('CustomerReturnsService zero-price returns', () => {
     expect(result.data.previousReferenceAmount).toBe(200000);
     expect(result.data.priceDifferenceAmount).toBe(-200000);
   });
+
+  it('keeps the selected return time in preview', async () => {
+    const service: any = Object.create(CustomerReturnsService.prototype);
+    const dto = baseDto();
+    (dto as any).date = '2026-10-10T08:30:00.000Z';
+
+    const result = await service.preview(dto as any);
+
+    expect(result.data.date).toEqual(new Date('2026-10-10T08:30:00.000Z'));
+  });
 });

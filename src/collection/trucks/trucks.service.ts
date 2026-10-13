@@ -1652,10 +1652,22 @@ export class TrucksService {
         .find({
           isDeleted: false,
           type: { $in: movementTypes },
-          createdAt: { $gte: from, $lte: to },
-          $or: [{ sourceTruckId: truckId }, { destinationTruckId: truckId }],
+          $and: [
+            { $or: [{ sourceTruckId: truckId }, { destinationTruckId: truckId }] },
+            {
+              $or: [
+                { occurredAt: { $gte: from, $lte: to } },
+                {
+                  $and: [
+                    { $or: [{ occurredAt: { $exists: false } }, { occurredAt: null }] },
+                    { createdAt: { $gte: from, $lte: to } },
+                  ],
+                },
+              ],
+            },
+          ],
         })
-        .sort({ createdAt: 1, _id: 1 })
+        .sort({ occurredAt: 1, createdAt: 1, _id: 1 })
         .lean(),
       this.invoiceModel
         .find({
@@ -1672,11 +1684,17 @@ export class TrucksService {
           isDeleted: false,
           destinationTruckId: truckId,
           $or: [
-            { createdAt: { $gte: from, $lte: to } },
+            { date: { $gte: from, $lte: to } },
+            {
+              $and: [
+                { $or: [{ date: { $exists: false } }, { date: null }] },
+                { createdAt: { $gte: from, $lte: to } },
+              ],
+            },
             { reversedAt: { $gte: from, $lte: to } },
           ],
         })
-        .select('code status createdAt reversedAt items')
+        .select('code status date createdAt reversedAt items')
         .lean(),
     ]);
     const productIds = [...new Set(movements.map((x) => String(x.productId)))];
@@ -1766,7 +1784,8 @@ export class TrucksService {
             name: item.manualName,
             unit: item.manualUnit,
           });
-        if (ret.createdAt >= from && ret.createdAt <= to) {
+        const returnDate = ret.date || ret.createdAt;
+        if (returnDate >= from && returnDate <= to) {
           row.customerReturnQuantity += Number(item.qty || 0);
           row.documentKeys.add(`return:${ret.code}`);
           allDocumentKeys.add(`return:${ret.code}`);

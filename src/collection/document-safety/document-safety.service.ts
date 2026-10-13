@@ -111,9 +111,17 @@ export class DocumentSafetyService {
       this.returns
         .find({
           isDeleted: { $ne: true },
-          createdAt: { $gte: from, $lte: to },
+          $or: [
+            { date: { $gte: from, $lte: to } },
+            {
+              $and: [
+                { $or: [{ date: { $exists: false } }, { date: null }] },
+                { createdAt: { $gte: from, $lte: to } },
+              ],
+            },
+          ],
         })
-        .sort({ createdAt: 1, _id: 1 })
+        .sort({ date: 1, createdAt: 1, _id: 1 })
         .lean(),
     ]);
     return { from, to, invoices, receipts, returns };
@@ -163,7 +171,7 @@ export class DocumentSafetyService {
       id: String(item._id),
       type: 'CUSTOMER_RETURN',
       code: item.code,
-      occurredAt: item.createdAt,
+      occurredAt: item.date || item.createdAt,
       createdAt: item.createdAt,
       status: item.status || CustomerReturnStatus.COMPLETED,
       customerCode: item.customerCode,

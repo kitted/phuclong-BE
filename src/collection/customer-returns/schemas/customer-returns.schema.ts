@@ -23,9 +23,10 @@ export class CustomerReturnItem {
 }
 export class ReturnRefund { @prop({ enum: RefundMethod, required: true }) method: RefundMethod; @prop({ required: true, min: 0 }) amount: number; @prop() referenceCode?: string; }
 
-@index({ code: 1 }, { unique: true }) @index({ idempotencyKey: 1 }, { unique: true }) @index({ createdAt: -1 })
+@index({ code: 1 }, { unique: true }) @index({ idempotencyKey: 1 }, { unique: true }) @index({ date: -1, createdAt: -1 })
 export class CustomerReturns extends BaseModel {
   @prop({ required: true }) code: string; @prop({ required: true }) idempotencyKey: string;
+  @prop({ required: true, default: Date.now }) date: Date;
   @prop({ required: true }) customerId: string; @prop() customerCode?: string; @prop({ required: true }) customerName: string; @prop() customerPhone?: string;
   @prop({ required: true }) destinationTruckId: string; @prop({ required: true }) destinationTruckCode: string; @prop({ required: true }) destinationTruckName: string; @prop() destinationTruckLicensePlate?: string; @prop() driverId?: string; @prop() driverName?: string;
   @prop({ type: () => [CustomerReturnItem], required: true }) items: CustomerReturnItem[];

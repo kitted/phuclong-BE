@@ -40,6 +40,9 @@ export enum InventoryLocationType {
 
 @index({ productId: 1, createdAt: -1 })
 export class InventoryMovements extends BaseModel {
+  @prop()
+  occurredAt?: Date;
+
   @prop({ ref: () => Products, required: true, index: true })
   productId: Ref<Products>;
 
