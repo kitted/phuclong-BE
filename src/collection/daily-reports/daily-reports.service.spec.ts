@@ -99,6 +99,46 @@ describe('DailyReportsService per-salesperson reporting', () => {
     );
   });
 
+  it('includes a full debt payment whose customer balance becomes 0đ', async () => {
+    const service: any = Object.create(DailyReportsService.prototype);
+    const salespersonId = '507f1f77bcf86cd799439011';
+    service.users = {
+      findOne: jest.fn().mockReturnValue(
+        leanResult({ _id: salespersonId, fullName: 'Sale 01' }),
+      ),
+    };
+    service.invoices = { find: jest.fn().mockReturnValue(leanResult([])) };
+    service.receipts = {
+      find: jest.fn().mockReturnValue(
+        leanResult([
+          {
+            _id: '507f191e810c19729de860ea',
+            code: 'PTCN-261013-000002',
+            salespersonId,
+            collectorId: '507f191e810c19729de860ff',
+            amount: 250000,
+            customerDebtBefore: 250000,
+            customerDebtAfter: 0,
+            payments: [{ method: 'CASH', amount: 250000 }],
+            allocations: [],
+          },
+        ]),
+      ),
+    };
+    service.returns = { find: jest.fn().mockReturnValue(leanResult([])) };
+
+    const result = await service.preview('2026-10-13', salespersonId);
+
+    expect(result.data.summary.debtReceiptCount).toBe(1);
+    expect(result.data.summary.cash).toBe(250000);
+    expect(result.data.documents).toContainEqual(
+      expect.objectContaining({
+        type: 'DEBT_PAYMENT',
+        amount: 250000,
+      }),
+    );
+  });
+
   it('checks duplicate reports by both date and salesperson', async () => {
     const service: any = Object.create(DailyReportsService.prototype);
     const salespersonId = '507f1f77bcf86cd799439011';
