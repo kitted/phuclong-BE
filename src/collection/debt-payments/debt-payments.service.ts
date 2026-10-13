@@ -133,6 +133,39 @@ export class DebtPaymentsService {
           .sort({ date: 1, _id: 1 })
           .session(session)
           .lean();
+        let salesperson: any = null;
+        if (actor.role === RoleEnum.STAFF) {
+          if (dto.salespersonId && String(dto.salespersonId) !== String(actor.id))
+            throw new ForbiddenException(
+              'Nhân viên chỉ được ghi nhận thu nợ vào báo cáo của chính mình',
+            );
+          salesperson = collector;
+        } else if (dto.salespersonId) {
+          salesperson = await this.users
+            .findOne({
+              _id: dto.salespersonId,
+              role: RoleEnum.STAFF,
+              isDeleted: false,
+              status: { $ne: UserStatus.INACTIVE },
+            })
+            .select('_id employeeCode fullName username')
+            .session(session)
+            .lean();
+          if (!salesperson)
+            throw new BadRequestException(
+              'Sale ghi nhận thanh toán công nợ không hợp lệ',
+            );
+        } else {
+          const inferredId = invoices
+            .map((invoice) => invoice.salespersonId)
+            .find((id) => id && Types.ObjectId.isValid(String(id)));
+          if (inferredId)
+            salesperson = await this.users
+              .findOne({ _id: inferredId, role: RoleEnum.STAFF })
+              .select('_id employeeCode fullName username')
+              .session(session)
+              .lean();
+        }
         if (selectedIds.length && invoices.length !== selectedIds.length)
           throw new BadRequestException(
             'Một hoặc nhiều hóa đơn không còn công nợ hoặc không thuộc khách hàng',
@@ -236,6 +269,9 @@ export class DebtPaymentsService {
                 collectorId: collector._id,
                 collectorCode: collector.employeeCode,
                 collectorName: collector.fullName || collector.username,
+                salespersonId: salesperson?._id,
+                salespersonCode: salesperson?.employeeCode,
+                salespersonName: salesperson?.fullName || salesperson?.username,
                 createdBy: collector._id,
                 createdByRole: collector.role,
               },

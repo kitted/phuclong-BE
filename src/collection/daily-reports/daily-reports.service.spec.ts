@@ -31,7 +31,10 @@ describe('DailyReportsService per-salesperson reporting', () => {
       expect.objectContaining({ salespersonId }),
     );
     expect(service.receipts.find).toHaveBeenCalledWith(
-      expect.objectContaining({ collectorId: salespersonId }),
+      expect.objectContaining({
+        status: 'ACTIVE',
+        date: expect.any(Object),
+      }),
     );
     expect(service.returns.find).toHaveBeenCalledWith(
       expect.objectContaining({ driverId: salespersonId }),
@@ -41,6 +44,59 @@ describe('DailyReportsService per-salesperson reporting', () => {
       code: 'SALE01',
       name: 'Sale 01',
     });
+  });
+
+  it('includes a debt payment linked to the selected salesperson invoice even when an admin collected it', async () => {
+    const service: any = Object.create(DailyReportsService.prototype);
+    const salespersonId = '507f1f77bcf86cd799439011';
+    const receiptId = '507f191e810c19729de860ea';
+    service.users = {
+      findOne: jest.fn().mockReturnValue(
+        leanResult({ _id: salespersonId, fullName: 'Sale 01' }),
+      ),
+    };
+    service.invoices = {
+      find: jest.fn().mockReturnValue(
+        leanResult([
+          {
+            _id: 'invoice-current',
+            salespersonId,
+            debtPaymentId: receiptId,
+            grandTotal: 100000,
+            payments: [{ method: 'CASH', amount: 100000 }],
+            items: [],
+          },
+        ]),
+      ),
+    };
+    service.receipts = {
+      find: jest.fn().mockReturnValue(
+        leanResult([
+          {
+            _id: receiptId,
+            code: 'PTCN-261013-000001',
+            collectorId: '507f191e810c19729de860ff',
+            collectorName: 'Admin',
+            amount: 50000,
+            payments: [{ method: 'BANK_TRANSFER', amount: 50000 }],
+            allocations: [],
+          },
+        ]),
+      ),
+    };
+    service.returns = { find: jest.fn().mockReturnValue(leanResult([])) };
+
+    const result = await service.preview('2026-10-13', salespersonId);
+
+    expect(result.data.summary.debtReceiptCount).toBe(1);
+    expect(result.data.summary.totalCollected).toBe(150000);
+    expect(result.data.documents).toContainEqual(
+      expect.objectContaining({
+        type: 'DEBT_PAYMENT',
+        code: 'PTCN-261013-000001',
+        amount: 50000,
+      }),
+    );
   });
 
   it('checks duplicate reports by both date and salesperson', async () => {

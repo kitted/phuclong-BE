@@ -9,6 +9,7 @@ export class DebtReceiptPayment { @prop({ required: true, enum: PaymentMethod })
 export class DebtPaymentAllocation { @prop({ ref: () => Invoices, required: true }) invoiceId: Ref<Invoices>; @prop({ required: true }) invoiceCode: string; @prop({ required: true, min: 0 }) amount: number; @prop({ required: true, min: 0 }) debtBefore: number; @prop({ required: true, min: 0 }) debtAfter: number; }
 @index({ customerId: 1, date: -1 })
 @index({ collectorId: 1, date: -1 })
+@index({ salespersonId: 1, date: -1 })
 @index({ status: 1, date: -1 })
 @index({ date: 1, status: 1 })
 export class DebtPayments extends BaseModel {
@@ -18,6 +19,7 @@ export class DebtPayments extends BaseModel {
   @prop({ required: true, min: 0 }) customerDebtBefore: number; @prop({ required: true, min: 0 }) customerDebtAfter: number;
   @prop({ enum: DebtPaymentStatus, default: DebtPaymentStatus.ACTIVE }) status: DebtPaymentStatus; @prop() note?: string;
   @prop({ ref: () => Users, required: true }) collectorId: Ref<Users>; @prop() collectorCode?: string; @prop({ required: true }) collectorName: string;
+  @prop({ ref: () => Users }) salespersonId?: Ref<Users>; @prop() salespersonCode?: string; @prop() salespersonName?: string;
   @prop({ ref: () => Users }) createdBy?: Ref<Users>; @prop({ enum: RoleEnum }) createdByRole?: RoleEnum;
   @prop({ ref: () => Users }) cancelledBy?: Ref<Users>; @prop() cancelledAt?: Date; @prop() cancelReason?: string;
 }

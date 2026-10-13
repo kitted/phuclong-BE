@@ -195,7 +195,7 @@ export class DailyReportsService {
       .lean();
     const from = vietnamDateBoundary(date, false),
       to = vietnamDateBoundary(date, true),
-      [invoices, receipts, returns]: any[][] = await Promise.all([
+      [invoices, receiptRows, returns]: any[][] = await Promise.all([
         this.invoices
           .find({
             isDeleted: { $ne: true },
@@ -209,7 +209,6 @@ export class DailyReportsService {
             isDeleted: false,
             status: DebtPaymentStatus.ACTIVE,
             date: { $gte: from, $lte: to },
-            collectorId: salespersonId,
           })
           .lean(),
         this.returns
@@ -229,6 +228,49 @@ export class DailyReportsService {
           })
           .lean(),
       ]);
+    const linkedReceiptIds = new Set(
+      invoices
+        .map((invoice) => String(invoice.debtPaymentId || ''))
+        .filter(Boolean),
+    );
+    const legacyAllocationInvoiceIds = [
+      ...new Set(
+        receiptRows
+          .filter(
+            (receipt) =>
+              !receipt.salespersonId &&
+              String(receipt.collectorId || '') !== salespersonId &&
+              !linkedReceiptIds.has(String(receipt._id)),
+          )
+          .flatMap((receipt) => receipt.allocations || [])
+          .map((allocation) => String(allocation.invoiceId || ''))
+          .filter((id) => Types.ObjectId.isValid(id)),
+      ),
+    ];
+    const legacyAllocationInvoices: any[] = legacyAllocationInvoiceIds.length
+      ? await this.invoices
+          .find({ _id: { $in: legacyAllocationInvoiceIds } })
+          .select('_id salespersonId')
+          .lean()
+      : [];
+    const allocationSalespeople = new Map(
+      legacyAllocationInvoices.map((invoice) => [
+        String(invoice._id),
+        String(invoice.salespersonId || ''),
+      ]),
+    );
+    const receipts = receiptRows.filter((receipt) => {
+      if (receipt.salespersonId)
+        return String(receipt.salespersonId) === salespersonId;
+      if (linkedReceiptIds.has(String(receipt._id))) return true;
+      if (String(receipt.collectorId || '') === salespersonId) return true;
+      const firstAllocatedSalesperson = (receipt.allocations || [])
+        .map((allocation) =>
+          allocationSalespeople.get(String(allocation.invoiceId || '')),
+        )
+        .find(Boolean);
+      return firstAllocatedSalesperson === salespersonId;
+    });
     const historicalInvoice = invoices[0];
     if (!salesperson && !historicalInvoice)
       throw new NotFoundException(
