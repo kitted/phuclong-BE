@@ -29,6 +29,63 @@ import * as ExcelJS from 'exceljs';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 import { LeadsService } from '../leads/leads.service';
 import { CustomerCoinsService } from '../customer-coins/customer-coins.service';
+import { CustomerReturns } from '../customer-returns/schemas/customer-returns.schema';
+
+describe('invoice unified timeline filters', () => {
+  it('applies search and date range to invoices, debt receipts, and customer returns', async () => {
+    const service: any = Object.create(InvoicesService.prototype);
+    service.resolveInvoiceReadScope = jest
+      .fn()
+      .mockResolvedValue({ id: 'admin', canViewAll: true });
+
+    const filters = await service.timelineFilters(
+      {
+        search: 'KH278',
+        from: '2026-10-01',
+        to: '2026-10-22',
+      },
+      { id: 'admin', role: RoleEnum.ADMIN },
+    );
+
+    for (const filter of [
+      filters.invoiceFilter,
+      filters.receiptFilter,
+      filters.returnFilter,
+    ]) {
+      expect(filter.$and).toEqual(expect.any(Array));
+      expect(filter.$and).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ $or: expect.any(Array) }),
+        ]),
+      );
+    }
+    expect(filters.returnFilter.$and).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          $or: expect.arrayContaining([
+            { customerCode: { $regex: 'KH278', $options: 'i' } },
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  it('can select only customer-return documents', async () => {
+    const service: any = Object.create(InvoicesService.prototype);
+    service.resolveInvoiceReadScope = jest
+      .fn()
+      .mockResolvedValue({ id: 'admin', canViewAll: true });
+
+    const filters = await service.timelineFilters(
+      { documentType: 'CUSTOMER_RETURN', sortOrder: 'asc' },
+      { id: 'admin', role: RoleEnum.ADMIN },
+    );
+
+    expect(filters.invoiceFilter._id).toEqual({ $exists: false });
+    expect(filters.receiptFilter._id).toEqual({ $exists: false });
+    expect(filters.returnFilter._id).toBeUndefined();
+  });
+});
 
 describe('invoice salesperson authorization', () => {
   const staffId = '507f1f77bcf86cd799439011';
@@ -296,6 +353,7 @@ describe('InvoicesService dependency injection', () => {
       CustomerDebtLedger,
       DebtPayments,
       DebtPaymentCounters,
+      CustomerReturns,
     ];
     const module = await Test.createTestingModule({
       providers: [

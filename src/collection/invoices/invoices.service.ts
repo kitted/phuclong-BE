@@ -74,6 +74,7 @@ import * as ExcelJS from 'exceljs';
 import { LeadsService } from '../leads/leads.service';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 import { CustomerCoinsService } from '../customer-coins/customer-coins.service';
+import { CustomerReturns } from '../customer-returns/schemas/customer-returns.schema';
 import { parseBusinessDate } from '../../core/business-date';
 
 type Actor = { id?: string; role?: RoleEnum; name?: string };
@@ -168,6 +169,10 @@ export class InvoicesService {
     @InjectModel(DebtPaymentCounters)
     private readonly debtPaymentCounterModel: ReturnModelType<
       typeof DebtPaymentCounters
+    >,
+    @InjectModel(CustomerReturns)
+    private readonly customerReturnModel: ReturnModelType<
+      typeof CustomerReturns
     >,
     private readonly movements: InventoryMovementsService,
     private readonly ruleEngine: PromotionRuleEngineService,
@@ -2208,7 +2213,7 @@ export class InvoicesService {
   }
 
   async timeline(query: InvoiceQueryDto = {}, actor: Actor = {}): Promise<any> {
-    const { invoiceFilter, receiptFilter } = await this.timelineFilters(
+    const { invoiceFilter, receiptFilter, returnFilter } = await this.timelineFilters(
       query,
       actor,
     );
@@ -2217,6 +2222,8 @@ export class InvoicesService {
     const documents = await this.timelineDocuments(
       invoiceFilter,
       receiptFilter,
+      returnFilter,
+      query.sortOrder,
     );
     const total = documents.length;
     return {
@@ -2228,56 +2235,91 @@ export class InvoicesService {
   private async timelineFilters(
     query: InvoiceQueryDto,
     actor: Actor,
-  ): Promise<{ invoiceFilter: any; receiptFilter: any }> {
+  ): Promise<{ invoiceFilter: any; receiptFilter: any; returnFilter: any }> {
     const access = await this.resolveInvoiceReadScope(actor);
     // Keep the timeline/export compatible with historical documents created
     // before the soft-delete field was introduced.
     const invoiceFilter: any = { isDeleted: { $ne: true } };
     const receiptFilter: any = { isDeleted: { $ne: true } };
+    const returnFilter: any = { isDeleted: { $ne: true } };
     const salespersonId = access.canViewAll ? query.salespersonId : access.id;
     if (salespersonId) {
       invoiceFilter.salespersonId = salespersonId;
-      receiptFilter.collectorId = salespersonId;
+      receiptFilter.$and = [
+        {
+          $or: [
+            { salespersonId },
+            {
+              salespersonId: { $exists: false },
+              collectorId: salespersonId,
+            },
+            { salespersonId: null, collectorId: salespersonId },
+          ],
+        },
+      ];
+      returnFilter.driverId = salespersonId;
+    }
+    if (query.documentType === 'INVOICE') {
+      receiptFilter._id = { $exists: false };
+      returnFilter._id = { $exists: false };
+    } else if (query.documentType === 'DEBT_PAYMENT') {
+      invoiceFilter._id = { $exists: false };
+      returnFilter._id = { $exists: false };
+    } else if (query.documentType === 'CUSTOMER_RETURN') {
+      invoiceFilter._id = { $exists: false };
+      receiptFilter._id = { $exists: false };
     }
     if (query.paymentStatus) {
       invoiceFilter.paymentStatus = query.paymentStatus;
       receiptFilter._id = { $exists: false };
+      returnFilter._id = { $exists: false };
     }
     this.applyInvoicePeriod(invoiceFilter, query);
     this.applyInvoicePeriod(receiptFilter, query);
+    this.applyInvoicePeriod(returnFilter, query);
     if (query.search?.trim()) {
       const escaped = query.search
         .trim()
         .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = { $regex: escaped, $options: 'i' };
-      invoiceFilter.$or = [
-        { code: regex },
-        { customer: regex },
-        { customerCode: regex },
-        { customerName: regex },
-        { customerPhone: regex },
-        { salespersonCode: regex },
-        { salespersonName: regex },
-        { 'promotionApplications.activationCode': regex },
+      invoiceFilter.$and = [
+        ...(invoiceFilter.$and || []),
+        { $or: [
+          { code: regex }, { customer: regex }, { customerCode: regex },
+          { customerName: regex }, { customerPhone: regex },
+          { salespersonCode: regex }, { salespersonName: regex },
+          { 'promotionApplications.activationCode': regex },
+        ] },
       ];
-      receiptFilter.$or = [
-        { code: regex },
-        { customerCode: regex },
-        { customerName: regex },
-        { customerPhone: regex },
-        { collectorCode: regex },
-        { collectorName: regex },
-        { 'allocations.invoiceCode': regex },
+      receiptFilter.$and = [
+        ...(receiptFilter.$and || []),
+        { $or: [
+          { code: regex }, { customerCode: regex }, { customerName: regex },
+          { customerPhone: regex }, { collectorCode: regex },
+          { collectorName: regex }, { salespersonCode: regex },
+          { salespersonName: regex }, { 'allocations.invoiceCode': regex },
+        ] },
+      ];
+      returnFilter.$and = [
+        ...(returnFilter.$and || []),
+        { $or: [
+          { code: regex }, { customerCode: regex }, { customerName: regex },
+          { customerPhone: regex }, { destinationTruckCode: regex },
+          { destinationTruckName: regex }, { destinationTruckLicensePlate: regex },
+          { driverName: regex },
+        ] },
       ];
     }
-    return { invoiceFilter, receiptFilter };
+    return { invoiceFilter, receiptFilter, returnFilter };
   }
 
   private async timelineDocuments(
     invoiceFilter: any,
     receiptFilter: any,
+    returnFilter: any = { _id: { $exists: false } },
+    sortOrder: 'asc' | 'desc' = 'desc',
   ): Promise<any[]> {
-    const [invoices, receipts] = await Promise.all([
+    const [invoices, receipts, returns] = await Promise.all([
       this.model
         .find(invoiceFilter)
         .select('-__v')
@@ -2288,8 +2330,12 @@ export class InvoicesService {
         .populate('salespersonId', 'employeeCode fullName')
         .lean(),
       this.debtPaymentModel.find(receiptFilter).select('-__v').lean(),
+      this.customerReturnModel.find(returnFilter).select('-__v').lean(),
     ]);
-    const enrichedInvoices = await this.withItemImages(invoices);
+    const [enrichedInvoices, enrichedReturns] = await Promise.all([
+      this.withItemImages(invoices),
+      this.withItemImages(returns),
+    ]);
     const documents = [
       ...enrichedInvoices.map((invoice: any) => ({
         ...invoice,
@@ -2301,12 +2347,21 @@ export class InvoicesService {
         id: String(receipt._id),
         documentType: 'DEBT_PAYMENT',
       })),
+      ...enrichedReturns.map((customerReturn: any) => ({
+        ...customerReturn,
+        id: String(customerReturn._id),
+        documentType: 'CUSTOMER_RETURN',
+      })),
     ].sort((left: any, right: any) => {
-      const dateDifference =
-        new Date(right.date || right.createdAt).getTime() -
-        new Date(left.date || left.createdAt).getTime();
+      const dateDifference = (sortOrder === 'asc' ? 1 : -1) * (
+        new Date(left.date || left.createdAt).getTime() -
+        new Date(right.date || right.createdAt).getTime()
+      );
       return (
-        dateDifference || String(right._id).localeCompare(String(left._id))
+        dateDifference ||
+        (sortOrder === 'asc'
+          ? String(left._id).localeCompare(String(right._id))
+          : String(right._id).localeCompare(String(left._id)))
       );
     });
     return documents;
@@ -2316,13 +2371,15 @@ export class InvoicesService {
     query: InvoiceQueryDto = {},
     actor: Actor = {},
   ): Promise<Buffer> {
-    const { invoiceFilter, receiptFilter } = await this.timelineFilters(
+    const { invoiceFilter, receiptFilter, returnFilter } = await this.timelineFilters(
       { ...query, page: undefined, limit: undefined },
       actor,
     );
     const documents = await this.timelineDocuments(
       invoiceFilter,
       receiptFilter,
+      returnFilter,
+      query.sortOrder,
     );
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Phuc Long';
@@ -2351,6 +2408,7 @@ export class InvoicesService {
     const productRows: any[] = [];
     documents.forEach((doc: any, index) => {
       const receipt = doc.documentType === 'DEBT_PAYMENT';
+      const customerReturn = doc.documentType === 'CUSTOMER_RETURN';
       const customer: any =
         doc.customerId && typeof doc.customerId === 'object'
           ? doc.customerId
@@ -2367,15 +2425,31 @@ export class InvoicesService {
               lineType: InvoiceLineType.SALE,
             },
           ]
-        : doc.items || [];
+        : customerReturn
+          ? (doc.items || []).map((item: any) => ({
+              ...item,
+              productName: item.productName || item.manualName || 'Hàng hoàn',
+              productCode: item.productCode || item.manualCode || '',
+              unit: item.unit || item.manualUnit || '',
+              price: Number(item.returnUnitPrice || 0),
+              lineTotal: Number(item.lineReturnAmount || 0),
+              lineType: 'RETURN',
+            }))
+          : doc.items || [];
       const reversed =
         doc.status === InvoiceStatus.REVERSED || Boolean(doc.reversedAt);
       const receivedAmount = receipt
         ? Number(doc.amount || 0)
+        : customerReturn
+          ? Number(doc.refundAmount || 0)
         : Number(doc.receivedAmount ?? doc.paidAmount ?? 0);
       invoicesSheet.addRow({
         number: index + 1,
-        documentType: receipt ? 'Thanh toán công nợ' : 'Hóa đơn bán hàng',
+        documentType: receipt
+          ? 'Thanh toán công nợ'
+          : customerReturn
+            ? 'Phiếu hoàn hàng'
+            : 'Hóa đơn bán hàng',
         code: doc.code || '',
         date: new Date(doc.date || doc.createdAt),
         customerCode: doc.customerCode || customer.code || '',
@@ -2395,14 +2469,20 @@ export class InvoicesService {
           .join('; '),
         grandTotal: receipt
           ? 0
+          : customerReturn
+            ? Number(doc.returnAmount || 0)
           : Number(doc.grandTotal ?? doc.totalAmount ?? 0),
         receivedAmount,
         customerDebtBefore: Number(doc.customerDebtBefore || 0),
         customerDebtAfter: Number(
           doc.customerDebtAfter ?? (receipt ? 0 : doc.debtAmount) ?? 0,
         ),
-        status: reversed
-          ? 'Đã hoàn'
+        status: customerReturn
+          ? doc.status === 'REVERSED'
+            ? 'Phiếu hoàn đã đảo'
+            : 'Đã nhận hàng hoàn'
+          : reversed
+            ? 'Đã hoàn hóa đơn'
           : receipt
             ? doc.status === DebtPaymentStatus.CANCELLED
               ? 'Phiếu thu đã hủy'
@@ -2428,6 +2508,8 @@ export class InvoicesService {
           classification:
             item.productId === 'DEBT_PAYMENT'
               ? 'Thanh toán công nợ'
+              : customerReturn
+                ? 'Hàng hoàn'
               : item.lineType === InvoiceLineType.GIFT
                 ? 'Quà tặng'
                 : 'Hàng bán',
@@ -2440,6 +2522,8 @@ export class InvoicesService {
           lineTotal: Number(item.lineTotal || 0),
           invoiceTotal: receipt
             ? 0
+            : customerReturn
+              ? Number(doc.returnAmount || 0)
             : Number(doc.grandTotal ?? doc.totalAmount ?? 0),
           receivedAmount,
           customerDebtAfter: Number(

@@ -22,6 +22,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { LeadsModule } from '../leads/leads.module';
 import { WebsiteProducts } from '../website-orders/schemas/website-products.schema';
 import { CustomerCoinsModule } from '../customer-coins/customer-coins.module';
+import { CustomerReturns } from '../customer-returns/schemas/customer-returns.schema';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { CustomerCoinsModule } from '../customer-coins/customer-coins.module';
       CustomerDebtLedger,
       DebtPayments,
       DebtPaymentCounters,
+      CustomerReturns,
     ]),
     InventoryMovementsModule,
     PromotionActivationsModule,

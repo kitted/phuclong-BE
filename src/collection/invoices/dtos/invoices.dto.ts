@@ -7,6 +7,7 @@ import {
   IsDateString,
   IsEnum,
   IsInt,
+  IsIn,
   IsMongoId,
   IsNumber,
   IsOptional,
@@ -162,6 +163,14 @@ export class InvoiceQueryDto {
   @IsOptional()
   @IsEnum(InvoicePaymentStatus)
   paymentStatus?: InvoicePaymentStatus;
+  @ApiPropertyOptional({ enum: ['INVOICE', 'DEBT_PAYMENT', 'CUSTOMER_RETURN'] })
+  @IsOptional()
+  @IsIn(['INVOICE', 'DEBT_PAYMENT', 'CUSTOMER_RETURN'])
+  documentType?: 'INVOICE' | 'DEBT_PAYMENT' | 'CUSTOMER_RETURN';
+  @ApiPropertyOptional({ enum: ['asc', 'desc'], default: 'desc' })
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc';
   @ApiPropertyOptional({ default: 1 }) @IsOptional() page?: string;
   @ApiPropertyOptional({ default: 20 }) @IsOptional() limit?: string;
 }
