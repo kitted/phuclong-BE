@@ -216,15 +216,7 @@ export class DailyReportsService {
             isDeleted: false,
             status: CustomerReturnStatus.COMPLETED,
             driverId: salespersonId,
-            $or: [
-              { date: { $gte: from, $lte: to } },
-              {
-                $and: [
-                  { $or: [{ date: { $exists: false } }, { date: null }] },
-                  { createdAt: { $gte: from, $lte: to } },
-                ],
-              },
-            ],
+            date: { $gte: from, $lte: to },
           })
           .lean(),
       ]);
@@ -359,7 +351,7 @@ export class DailyReportsService {
         type: 'CUSTOMER_RETURN',
         id: String(x._id),
         code: x.code,
-        date: x.date || x.createdAt,
+        date: x.date,
         customerName: x.customerName,
         customerId: x.customerId ? String(x.customerId) : undefined,
         employeeName: x.driverName,

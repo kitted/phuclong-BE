@@ -985,15 +985,15 @@ export class CustomersService implements OnModuleInit {
         .find({
           isDeleted: false,
           status: 'COMPLETED',
-          createdAt: {
+          date: {
             $gte: vietnamDateBoundary(q.date, false),
             $lte: vietnamDateBoundary(q.date, true),
           },
         })
         .select(
-          'code createdAt customerId customerCode customerName customerPhone createdBy returnAmount',
+          'code date customerId customerCode customerName customerPhone createdBy returnAmount',
         )
-        .sort({ createdAt: 1, code: 1 })
+        .sort({ date: 1, code: 1 })
         .lean(),
     ]);
     const customerIds = [
@@ -1149,7 +1149,7 @@ export class CustomersService implements OnModuleInit {
           customerSelectable: !customer,
           invoiceId: '',
           invoiceCode: document.code,
-          invoiceDate: document.date || document.createdAt,
+          invoiceDate: document.date,
           amount:
             documentType === 'DEBT_PAYMENT'
               ? Number(document.amount || 0)
@@ -1349,7 +1349,7 @@ export class CustomersService implements OnModuleInit {
                 _id: documentId,
                 isDeleted: false,
                 status: 'COMPLETED',
-                createdAt: dateFilter,
+                date: dateFilter,
               })
             : await this.invoiceModel.exists({
                 _id: documentId,

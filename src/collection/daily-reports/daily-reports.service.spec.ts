@@ -37,13 +37,56 @@ describe('DailyReportsService per-salesperson reporting', () => {
       }),
     );
     expect(service.returns.find).toHaveBeenCalledWith(
-      expect.objectContaining({ driverId: salespersonId }),
+      expect.objectContaining({
+        driverId: salespersonId,
+        date: expect.objectContaining({
+          $gte: expect.any(Date),
+          $lte: expect.any(Date),
+        }),
+      }),
     );
+    expect(service.returns.find.mock.calls[0][0]).not.toHaveProperty('$or');
     expect(result.data.salesperson).toMatchObject({
       id: salespersonId,
       code: 'SALE01',
       name: 'Sale 01',
     });
+  });
+
+  it('uses the customer return business date instead of createdAt', async () => {
+    const service: any = Object.create(DailyReportsService.prototype);
+    const salespersonId = '507f1f77bcf86cd799439011';
+    const returnDate = new Date('2026-10-06T02:00:00.000Z');
+    service.users = {
+      findOne: jest.fn().mockReturnValue(
+        leanResult({ _id: salespersonId, fullName: 'Sale 01' }),
+      ),
+    };
+    service.invoices = { find: jest.fn().mockReturnValue(leanResult([])) };
+    service.receipts = { find: jest.fn().mockReturnValue(leanResult([])) };
+    service.returns = {
+      find: jest.fn().mockReturnValue(
+        leanResult([
+          {
+            _id: '507f191e810c19729de860ea',
+            code: 'HHT-261006-000001',
+            date: returnDate,
+            createdAt: new Date('2026-10-07T02:00:00.000Z'),
+            driverId: salespersonId,
+            returnAmount: 100000,
+          },
+        ]),
+      ),
+    };
+
+    const result = await service.preview('2026-10-06', salespersonId);
+
+    expect(result.data.documents).toContainEqual(
+      expect.objectContaining({
+        type: 'CUSTOMER_RETURN',
+        date: returnDate,
+      }),
+    );
   });
 
   it('includes a debt payment linked to the selected salesperson invoice even when an admin collected it', async () => {

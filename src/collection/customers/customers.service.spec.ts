@@ -1,4 +1,33 @@
-import { buildCustomerInteractionImportKey, customerStoreProfileFlags, normalizePhones } from './customers.service';
+import {
+  buildCustomerInteractionImportKey,
+  customerStoreProfileFlags,
+  CustomersService,
+  normalizePhones,
+} from './customers.service';
+
+const selectSortLean = (value: unknown) => ({
+  select: jest.fn().mockReturnValue({
+    sort: jest.fn().mockReturnValue({
+      lean: jest.fn().mockResolvedValue(value),
+    }),
+  }),
+});
+
+const selectLean = (value: unknown) => ({
+  select: jest.fn().mockReturnValue({
+    lean: jest.fn().mockResolvedValue(value),
+  }),
+});
+
+const sortLean = (value: unknown) => ({
+  sort: jest.fn().mockReturnValue({
+    lean: jest.fn().mockResolvedValue(value),
+  }),
+});
+
+const lean = (value: unknown) => ({
+  lean: jest.fn().mockResolvedValue(value),
+});
 
 describe('customer phone normalization', () => {
   it('normalizes separators, prefixes and duplicate numbers', () => {
@@ -35,5 +64,54 @@ describe('customer store profile list flags', () => {
       storeLocation: { latitude: 10.7 },
       storefrontImage: {},
     })).toEqual({ hasStoreLocation: false, hasStorefrontImage: false });
+  });
+});
+
+describe('daily invoice follow-up customer return dates', () => {
+  it('filters and displays customer returns by business date, not createdAt', async () => {
+    const service: any = Object.create(CustomersService.prototype);
+    const returnDate = new Date('2026-10-06T02:00:00.000Z');
+    service.invoiceModel = {
+      find: jest.fn().mockReturnValue(selectSortLean([])),
+    };
+    service.debtPaymentModel = {
+      find: jest.fn().mockReturnValue(selectSortLean([])),
+    };
+    service.customerReturnModel = {
+      find: jest.fn().mockReturnValue(
+        selectSortLean([
+          {
+            _id: '507f191e810c19729de860ea',
+            code: 'HHT-261006-000001',
+            date: returnDate,
+            createdAt: new Date('2026-10-07T02:00:00.000Z'),
+            customerName: 'Khách hàng A',
+            returnAmount: 100000,
+          },
+        ]),
+      ),
+    };
+    service.model = { find: jest.fn().mockReturnValue(selectLean([])) };
+    service.invoiceFollowUpDraftModel = {
+      find: jest.fn().mockReturnValue(sortLean([])),
+    };
+    service.invoiceFollowUpBookModel = {
+      findOne: jest.fn().mockReturnValue(lean(null)),
+    };
+
+    const result = await service.dailyInvoiceFollowUps({ date: '2026-10-06' });
+    const query = service.customerReturnModel.find.mock.calls[0][0];
+
+    expect(query.date).toEqual({
+      $gte: expect.any(Date),
+      $lte: expect.any(Date),
+    });
+    expect(query).not.toHaveProperty('createdAt');
+    expect(result.data).toContainEqual(
+      expect.objectContaining({
+        documentType: 'CUSTOMER_RETURN',
+        invoiceDate: returnDate,
+      }),
+    );
   });
 });
