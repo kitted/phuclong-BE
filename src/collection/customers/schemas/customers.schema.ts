@@ -206,7 +206,7 @@ export class InvoiceFollowUpDrafts extends BaseModel {
 
 @index({ date: 1 }, { unique: true })
 export class InvoiceFollowUpBooks extends BaseModel {
-  @prop({ required: true, unique: true }) date: Date;
+  @prop({ required: true }) date: Date;
   @prop({ required: true, default: false }) isFinalized: boolean;
   @prop() finalizedAt?: Date;
   @prop() finalizedBy?: string;

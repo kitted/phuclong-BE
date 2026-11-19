@@ -12,7 +12,7 @@ export enum DocumentSafetyOperationStatus {
 @index({ activeLockKey: 1 }, { unique: true, sparse: true })
 @index({ documentDate: -1, createdAt: -1 })
 export class DocumentSafetyOperations extends BaseModel {
-  @prop({ required: true, unique: true })
+  @prop({ required: true })
   idempotencyKey: string;
 
   @prop()
