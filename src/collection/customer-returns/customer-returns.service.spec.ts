@@ -64,4 +64,54 @@ describe('CustomerReturnsService zero-price returns', () => {
 
     expect(result.data.date).toEqual(new Date('2026-10-10T08:30:00.000Z'));
   });
+
+  it('accepts a full debt reduction without a cash refund', async () => {
+    const service: any = Object.create(CustomerReturnsService.prototype);
+    const dto: any = baseDto();
+    dto.items = [
+      {
+        productId: new Types.ObjectId().toString(),
+        qty: 7,
+        previousUnitPrice: 120000,
+        returnUnitPrice: 120000,
+        condition: ReturnCondition.GOOD,
+      },
+    ];
+    dto.settlement = { debtReductionAmount: 840000, refunds: [] };
+
+    const result = await service.preview(dto as any);
+
+    expect(result.data.returnAmount).toBe(840000);
+    expect(result.data.refundAmount).toBe(0);
+    expect(result.data.settlement.debtReductionAmount).toBe(840000);
+  });
+
+  it('skips an existing code when the restored counter is stale', async () => {
+    const service: any = Object.create(CustomerReturnsService.prototype);
+    service.counters = {
+      findOneAndUpdate: jest
+        .fn()
+        .mockResolvedValueOnce({ sequence: 1 })
+        .mockResolvedValueOnce({ sequence: 2 }),
+    };
+    service.returns = {
+      exists: jest
+        .fn()
+        .mockReturnValueOnce({
+          session: jest.fn().mockResolvedValue({ _id: new Types.ObjectId() }),
+        })
+        .mockReturnValueOnce({ session: jest.fn().mockResolvedValue(null) }),
+    };
+
+    const code = await service.nextCode(
+      new Date('2026-11-18T02:02:00.000Z'),
+      {},
+    );
+
+    expect(code).toBe('HHT-261118-000002');
+    expect(service.counters.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(service.returns.exists).toHaveBeenNthCalledWith(1, {
+      code: 'HHT-261118-000001',
+    });
+  });
 });

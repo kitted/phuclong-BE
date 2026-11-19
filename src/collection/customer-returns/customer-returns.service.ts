@@ -59,13 +59,45 @@ export class CustomerReturnsService {
     return { lines, returnAmount, refundAmount, previousReferenceAmount: lines.reduce((s, x) => s + (x.previousUnitPrice === undefined ? 0 : x.previousUnitPrice * x.qty), 0), priceDifferenceAmount: lines.reduce((s, x) => s + (x.priceDifference || 0), 0) };
   }
   async preview(dto: CreateCustomerReturnDto) { return { data: { ...this.totals(dto), date: this.returnDate(dto), settlement: dto.settlement } }; }
-  private async nextCode(date: Date, session: any) { const key = date.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).replaceAll('-', ''); const c: any = await this.counters.findOneAndUpdate({ key }, { $inc: { sequence: 1 } }, { upsert: true, new: true, session }); return `HHT-${key.slice(2)}-${String(c.sequence).padStart(6, '0')}`; }
+  private async nextCode(date: Date, session: any) {
+    const key = date
+      .toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' })
+      .replaceAll('-', '');
+    const prefix = `HHT-${key.slice(2)}-`;
+    // Counter có thể thấp hơn dữ liệu thật sau khi restore một bản backup cũ.
+    // Tiếp tục tăng đến mã chưa tồn tại thay vì để unique index trả lỗi 500.
+    for (let attempt = 0; attempt < 10000; attempt++) {
+      const counter: any = await this.counters.findOneAndUpdate(
+        { key },
+        { $inc: { sequence: 1 } },
+        { upsert: true, new: true, session },
+      );
+      const code = `${prefix}${String(counter.sequence).padStart(6, '0')}`;
+      const duplicated = await this.returns.exists({ code }).session(session);
+      if (!duplicated) return code;
+    }
+    throw new ConflictException({
+      code: 'CUSTOMER_RETURN_CODE_EXHAUSTED',
+      message: 'Không thể cấp mã phiếu hoàn hàng, vui lòng thử lại',
+    });
+  }
   async create(dto: CreateCustomerReturnDto, actorId: string) {
     const existing: any = await this.returns.findOne({ idempotencyKey: dto.idempotencyKey }).lean(); if (existing) return { data: existing, idempotent: true };
     const calculated = this.totals(dto), returnDate = this.returnDate(dto), session = await this.connection.startSession(); let result: any;
     try { await session.withTransaction(async () => {
-      const [customer, truck]: any[] = await Promise.all([this.customers.findOne({ _id: dto.customerId, isDeleted: false }).session(session), this.trucks.findOne({ _id: dto.destinationTruckId, isDeleted: false, status: 'active' }).session(session)]);
+      // Không chạy song song các query dùng chung transaction/session.
+      const customer: any = await this.customers
+        .findOne({ _id: dto.customerId, isDeleted: false })
+        .session(session);
+      const truck: any = await this.trucks
+        .findOne({
+          _id: dto.destinationTruckId,
+          isDeleted: false,
+          status: 'active',
+        })
+        .session(session);
       if (!customer) throw new NotFoundException('Không tìm thấy khách hàng'); if (!truck) throw new NotFoundException('Không tìm thấy xe nhận hàng');
+      if (!Array.isArray(truck.inventory)) truck.inventory = [];
       if (dto.settlement.debtReductionAmount > Number(customer.debt || 0)) this.fail('CUSTOMER_RETURN_DEBT_EXCEEDED', 'Số tiền cấn nợ vượt quá công nợ hiện tại');
       const ids = dto.items.map((x) => x.productId).filter(Boolean); const productRows: any[] = ids.length ? await this.products.find({ _id: { $in: ids }, isDeleted: false }).session(session).lean() : []; const map = new Map(productRows.map((p) => [String(p._id), p])); if (map.size !== new Set(ids).size) this.fail('CUSTOMER_RETURN_PRODUCT_NOT_FOUND', 'Có sản phẩm không tồn tại');
       const code = await this.nextCode(returnDate, session), returnId = new Types.ObjectId(), items: any[] = [], movementRows: any[] = [];
@@ -154,7 +186,7 @@ export class CustomerReturnsService {
       const doc: any = (await this.returns.create([{ _id: returnId, code, idempotencyKey: dto.idempotencyKey, date: returnDate, customerId: String(customer._id), customerCode: customer.code, customerName: customer.name, customerPhone: customer.phone, destinationTruckId: String(truck._id), destinationTruckCode: truck.code, destinationTruckName: truck.name, destinationTruckLicensePlate: truck.licensePlate, driverId: truck.driverId && String(truck.driverId), driverName: truck.driverName || truck.driver, items, returnAmount: calculated.returnAmount, previousReferenceAmount: calculated.previousReferenceAmount, priceDifferenceAmount: calculated.priceDifferenceAmount, debtReductionAmount: dto.settlement.debtReductionAmount, refundAmount: calculated.refundAmount, refunds: dto.settlement.refunds, customerDebtBefore: before, customerDebtAfter: after, reason: dto.reason, priceAdjustmentReason: dto.priceAdjustmentReason, note: dto.note, status: CustomerReturnStatus.COMPLETED, createdBy: actorId }], { session }))[0];
       if (dto.settlement.debtReductionAmount) await this.ledger.create([{ customerId: customer._id, customerCode: customer.code, type: DebtLedgerType.CUSTOMER_RETURN_DEBT_REDUCTION, direction: DebtLedgerDirection.DECREASE, amount: dto.settlement.debtReductionAmount, previousDebt: before, decreaseAmount: dto.settlement.debtReductionAmount, balanceAfter: after, occurredAt: returnDate, effectiveAt: returnDate, referenceType: 'CUSTOMER_RETURN', referenceId: String(returnId), referenceCode: code, createdBy: actorId }], { session });
       await this.notifications.create([{ type: NotificationType.CUSTOMER_RETURN_CREATED, title: 'Phiếu hoàn hàng mới', message: `${code} - ${customer.name}`, audience: 'ADMIN', entityType: 'CUSTOMER_RETURN', entityId: String(returnId), entityCode: code }], { session }); result = doc.toObject();
-    }); } catch (e: any) { if (e?.code === 11000 && e?.keyPattern?.idempotencyKey) { const doc = await this.returns.findOne({ idempotencyKey: dto.idempotencyKey }).lean(); return { data: (await this.withImages([doc]))[0], idempotent: true }; } throw e; } finally { await session.endSession(); } return { data: (await this.withImages([result]))[0] };
+    }); } catch (e: any) { if (e?.code === 11000 && e?.keyPattern?.idempotencyKey) { const doc = await this.returns.findOne({ idempotencyKey: dto.idempotencyKey }).lean(); return { data: (await this.withImages([doc]))[0], idempotent: true }; } if (e?.code === 11000 && (e?.keyPattern?.code || e?.keyValue?.code)) throw new ConflictException({ code: 'CUSTOMER_RETURN_CODE_CONFLICT', message: 'Mã phiếu hoàn hàng vừa được sử dụng, vui lòng gửi lại yêu cầu' }); throw e; } finally { await session.endSession(); } return { data: (await this.withImages([result]))[0] };
   }
   async findAll(q: CustomerReturnQueryDto): Promise<any> { const page = q.page || 1, limit = Math.min(q.limit || 20, 100), filter: any = { isDeleted: false }; if (q.customerId) filter.customerId = q.customerId; if (q.destinationTruckId) filter.destinationTruckId = q.destinationTruckId; if (q.status) filter.status = q.status; const [data,total] = await Promise.all([this.returns.find(filter).sort({date:-1,createdAt:-1}).skip((page-1)*limit).limit(limit).lean(),this.returns.countDocuments(filter)]); return {data:await this.withImages(data),meta:{page,limit,total,totalPages:Math.ceil(total/limit)}}; }
   async summary(q: CustomerReturnQueryDto) { const filter: any = { isDeleted:false }; if(q.customerId)filter.customerId=q.customerId;if(q.destinationTruckId)filter.destinationTruckId=q.destinationTruckId; const rows:any[]=await this.returns.find(filter).select('status returnAmount debtReductionAmount refundAmount refunds').lean(); const active=rows.filter(x=>x.status===CustomerReturnStatus.COMPLETED); return {data:{totalReturns:active.length,returnAmount:active.reduce((s,x)=>s+x.returnAmount,0),debtReductionAmount:active.reduce((s,x)=>s+x.debtReductionAmount,0),refundAmount:active.reduce((s,x)=>s+x.refundAmount,0)}}; }
