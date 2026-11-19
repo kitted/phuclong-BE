@@ -114,4 +114,21 @@ describe('CustomerReturnsService zero-price returns', () => {
       code: 'HHT-261118-000001',
     });
   });
+
+  it('updates only debt without validating unrelated legacy interactions', async () => {
+    const service: any = Object.create(CustomerReturnsService.prototype);
+    const customerId = new Types.ObjectId();
+    const session = {};
+    service.customers = {
+      updateOne: jest.fn().mockResolvedValue({ matchedCount: 1 }),
+    };
+
+    await service.updateCustomerDebt(customerId, 840000, 0, session);
+
+    expect(service.customers.updateOne).toHaveBeenCalledWith(
+      { _id: customerId, isDeleted: false, debt: 840000 },
+      { $set: { debt: 0 } },
+      { session, runValidators: false },
+    );
+  });
 });
